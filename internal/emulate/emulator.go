@@ -58,7 +58,7 @@ func RunGetMethod(id int32, params RunMethodParams, withC7 bool, maxGas int64) (
 
 	emu := C.tvm_emulator_create(cCode, cData, 0)
 
-	C.tvm_emulator_set_gas_limit(emu, C.longlong(maxGas))
+	C.tvm_emulator_set_gas_limit(emu, C.int64_t(maxGas))
 	if !params.Libs.IsEmpty() {
 		cLibs := C.CString(b64(params.Libs.AsCell()))
 		defer C.free(unsafe.Pointer(cLibs))
@@ -73,7 +73,7 @@ func RunGetMethod(id int32, params RunMethodParams, withC7 bool, maxGas int64) (
 
 	cRnd := C.CString(hex.EncodeToString(rnd))
 	defer C.free(unsafe.Pointer(cRnd))
-	C.tvm_emulator_set_c7(emu, cAddr, C.uint(uint32(params.Time.Unix())), C.ulonglong(params.Balance.Uint64()), cRnd, cCfg)
+	C.tvm_emulator_set_c7(emu, cAddr, C.uint(uint32(params.Time.Unix())), C.uint64_t(params.Balance.Uint64()), cRnd, cCfg)
 
 	// TODO: set prev blocks?
 	if withC7 {
