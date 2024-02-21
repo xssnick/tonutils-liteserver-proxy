@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"crypto/ed25519"
+	"crypto/rand"
 	"fmt"
 	"github.com/kevinms/leakybucket-go"
 	"github.com/rs/zerolog/log"
@@ -319,16 +320,28 @@ func (s *ProxyBalancer) handleRunSmcMethod(ctx context.Context, v *ton.RunSmcMet
 
 	// TODO: precompiled contracts in go
 
+	var seed = make([]byte, 32)
+	_, _ = rand.Read(seed)
+
+	libsCell := libsCodes.AsCell()
+	if libsCell == nil {
+		libsCell = cell.BeginCell().EndCell()
+	}
+
 	etm := time.Now()
-	res, err := emulate.RunGetMethod(int32(v.MethodID), emulate.RunMethodParams{
+	res, err := emulate.RunGetMethod(emulate.RunMethodParams{
 		Code:    st.StateInit.Code,
 		Data:    st.StateInit.Data,
 		Address: addr,
 		Stack:   v.Params,
-		Balance: st.Balance.Nano(),
-		Libs:    libsCodes,
-		Config:  block.Config,
-		Time:    time.Now(),
+		Balance: st.Balance.Nano().Uint64(),
+		Params: emulate.MethodConfig{
+			Config: block.Config.AsCell(),
+			Libs:   libsCell,
+		},
+		MethodID: int32(v.MethodID),
+		Time:     uint32(time.Now().Unix()),
+		RandSeed: seed,
 	}, false, 1_000_000)
 	if err != nil {
 		log.Warn().Err(err).Type("request", v).Msg("failed to emulate get method")

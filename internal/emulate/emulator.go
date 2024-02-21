@@ -9,26 +9,28 @@ package emulate
 import "C"
 
 import (
-	"crypto/rand"
 	"encoding/base64"
-	"encoding/hex"
 	"github.com/xssnick/tonutils-go/address"
 	"github.com/xssnick/tonutils-go/tlb"
 	"github.com/xssnick/tonutils-go/tvm/cell"
-	"math/big"
-	"time"
 	"unsafe"
 )
 
+type MethodConfig struct {
+	Config *cell.Cell `tlb:"^"`
+	Libs   *cell.Cell `tlb:"^"`
+}
+
 type RunMethodParams struct {
-	Code    *cell.Cell
-	Data    *cell.Cell
-	Address *address.Address
-	Stack   *cell.Cell
-	Balance *big.Int
-	Libs    *cell.Dictionary
-	Config  *cell.Dictionary
-	Time    time.Time
+	Code     *cell.Cell       `tlb:"^"`
+	Data     *cell.Cell       `tlb:"^"`
+	Address  *address.Address `tlb:"addr"`
+	Stack    *cell.Cell       `tlb:"^"`
+	Balance  uint64           `tlb:"## 64"`
+	Params   MethodConfig     `tlb:"^"`
+	MethodID int32            `tlb:"## 32"`
+	Time     uint32           `tlb:"## 32"`
+	RandSeed []byte           `tlb:"bits 256"`
 }
 
 type RunResult struct {
@@ -43,52 +45,22 @@ func init() {
 	C.emulator_set_verbosity_level(0)
 }
 
-func RunGetMethod(id int32, params RunMethodParams, withC7 bool, maxGas int64) (*RunResult, error) {
-	cCfg := C.CString(b64(params.Config.AsCell()))
-	defer C.free(unsafe.Pointer(cCfg))
-
-	cStack := C.CString(b64(params.Stack))
-	defer C.free(unsafe.Pointer(cStack))
-
-	cCode := C.CString(b64(params.Code))
-	defer C.free(unsafe.Pointer(cCode))
-
-	cData := C.CString(b64(params.Data))
-	defer C.free(unsafe.Pointer(cData))
-
-	emu := C.tvm_emulator_create(cCode, cData, 0)
-
-	C.tvm_emulator_set_gas_limit(emu, C.int64_t(maxGas))
-	if !params.Libs.IsEmpty() {
-		cLibs := C.CString(b64(params.Libs.AsCell()))
-		defer C.free(unsafe.Pointer(cLibs))
-		C.tvm_emulator_set_libraries(emu, cLibs)
-	}
-
-	cAddr := C.CString(params.Address.String())
-	defer C.free(unsafe.Pointer(cAddr))
-
-	rnd := make([]byte, 32)
-	_, _ = rand.Read(rnd)
-
-	cRnd := C.CString(hex.EncodeToString(rnd))
-	defer C.free(unsafe.Pointer(cRnd))
-	C.tvm_emulator_set_c7(emu, cAddr, C.uint(uint32(params.Time.Unix())), C.uint64_t(params.Balance.Uint64()), cRnd, cCfg)
-
-	// TODO: set prev blocks?
-	if withC7 {
-		// TODO: build c7 cell
-	}
-
-	res := C.tvm_emulator_run_get_method_optimized(emu, C.int(id), cStack)
-	C.tvm_emulator_destroy(emu)
-
-	boc, err := base64.StdEncoding.DecodeString(C.GoString(res))
+func RunGetMethod(params RunMethodParams, withC7 bool, maxGas int64) (*RunResult, error) {
+	req, err := tlb.ToCell(params)
 	if err != nil {
 		return nil, err
 	}
 
-	c, err := cell.FromBOC(boc)
+	boc := req.ToBOCWithFlags(false)
+
+	cReq := C.CBytes(boc)
+	defer C.free(unsafe.Pointer(cReq))
+
+	res := C.tvm_emulate(C.uint32_t(len(boc)), (*C.char)(cReq), C.int64_t(maxGas))
+	defer C.free(unsafe.Pointer(res))
+
+	data := C.GoBytes(unsafe.Pointer(uintptr(unsafe.Pointer(res))+4), (C.int)(C.uint32_t(*res)))
+	c, err := cell.FromBOC(data)
 	if err != nil {
 		return nil, err
 	}
