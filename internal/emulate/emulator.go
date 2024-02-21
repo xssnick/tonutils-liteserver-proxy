@@ -10,6 +10,7 @@ import "C"
 
 import (
 	"encoding/base64"
+	"fmt"
 	"github.com/xssnick/tonutils-go/address"
 	"github.com/xssnick/tonutils-go/tlb"
 	"github.com/xssnick/tonutils-go/tvm/cell"
@@ -56,11 +57,14 @@ func RunGetMethod(params RunMethodParams, withC7 bool, maxGas int64) (*RunResult
 	cReq := C.CBytes(boc)
 	defer C.free(unsafe.Pointer(cReq))
 
-	res := C.tvm_emulator_emulate(C.uint32_t(len(boc)), (*C.char)(cReq), C.int64_t(maxGas))
-	defer C.free(unsafe.Pointer(res))
+	res := unsafe.Pointer(C.tvm_emulator_emulate(C.uint32_t(len(boc)), (*C.char)(cReq), C.int64_t(maxGas)))
+	if res == nil {
+		return nil, fmt.Errorf("failed to execute tvm")
+	}
+	defer C.free(res)
 
-	sz := *(*C.uint32_t)(unsafe.Pointer(res))
-	data := C.GoBytes(unsafe.Pointer(uintptr(unsafe.Pointer(res))+4), C.int(sz))
+	sz := *(*C.uint32_t)(res)
+	data := C.GoBytes(unsafe.Pointer(uintptr(res)+4), C.int(sz))
 	c, err := cell.FromBOC(data)
 	if err != nil {
 		return nil, err

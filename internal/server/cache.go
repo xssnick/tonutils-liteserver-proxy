@@ -207,6 +207,13 @@ func (c *BlockCache) GetMasterBlock(ctx context.Context, id *ton.BlockIDExt) (*M
 		}
 	}
 
+	if lastSeqno > 0 && id.SeqNo > lastSeqno+200 {
+		return nil, false, ton.LSError{
+			Code: 404,
+			Text: "too future block",
+		}
+	}
+
 	if b == nil {
 		// lock optimization
 		c.mx.Lock()
@@ -334,7 +341,7 @@ func (c *BlockCache) GetMasterBlock(ctx context.Context, id *ton.BlockIDExt) (*M
 
 			// clean old blocks
 			for k, lb := range c.masterBlocks {
-				if c.lastBlock.SeqNo-lb.Block.ID.SeqNo > c.config.MaxMasterBlockSeqnoDiffToCache {
+				if lb.ID != nil && c.lastBlock.SeqNo-lb.Block.ID.SeqNo > c.config.MaxMasterBlockSeqnoDiffToCache {
 					delete(c.masterBlocks, k)
 				}
 			}
@@ -536,7 +543,7 @@ func (c *BlockCache) cacheBlockIfNeeded(ctx context.Context, id *ton.BlockIDExt)
 		needCache := c.lastBlock != nil && id.SeqNo < c.lastBlock.SeqNo-c.config.MaxMasterBlockSeqnoDiffToCache
 		c.mx.RUnlock()
 
-		if b != nil {
+		if b != nil && b.Block.ID != nil {
 			if !b.Block.ID.Equals(id) {
 				return nil, false, ton.LSError{
 					Code: 403,
