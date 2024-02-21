@@ -3,6 +3,7 @@ proxy:
 	CGO_ENABLED=1 go build -o build/liteserver cmd/main.go
 
 lib-linux:
+	git submodule update --remote --merge
 	mkdir -p build/lib
 	rm -rf ton-build
 	mkdir ton-build
