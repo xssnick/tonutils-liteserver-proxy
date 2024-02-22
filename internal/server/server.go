@@ -683,6 +683,11 @@ func (s *ProxyBalancer) handleGetTransaction(ctx context.Context, v *ton.GetOneT
 }
 
 func (s *ProxyBalancer) handleGetAccount(ctx context.Context, v *ton.GetAccountState) (tl.Serializable, string) {
+	if v.ID.Workchain != -1 {
+		// TODO: account state on shard block level
+		return nil, HitTypeBackend
+	}
+
 	block, cachedBlock, err := s.cache.GetMasterBlock(ctx, v.ID)
 	if err != nil {
 		if ls, ok := err.(ton.LSError); ok {
