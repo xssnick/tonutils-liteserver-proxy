@@ -324,7 +324,7 @@ func (c *BlockCache) GetMasterBlock(ctx context.Context, id *ton.BlockIDExt) (*M
 			c.lastBlock = b.Block.ID
 
 			for _, shard := range shards {
-				shardKey := getShardKey(shard)
+				shardKey := getShardKey(shard.Workchain, shard.Shard)
 				si := c.shardBlocks[shardKey]
 				if si == nil {
 					si = &ShardInfo{
@@ -475,11 +475,58 @@ func (c *BlockCache) GetAccountState(ctx context.Context, block *MasterBlock, ad
 	return account, false, nil
 }
 
+func (c *BlockCache) LookupBlockInCache(id *ton.BlockInfoShort) (*ton.BlockHeader, error) {
+	var blk *Block
+	if id.Workchain == -1 {
+		c.mx.RLock()
+		b := c.masterBlocks[uint32(id.Seqno)]
+		c.mx.RUnlock()
+
+		if b != nil {
+			b.mx.RLock()
+			if b.Block.Data != nil {
+				blk = &b.Block
+			}
+			b.mx.RUnlock()
+		}
+	} else {
+		c.mx.RLock()
+		si := c.shardBlocks[getShardKey(id.Workchain, id.Shard)]
+		b := si.shardBlocks[uint32(id.Seqno)]
+		c.mx.RUnlock()
+
+		if b != nil {
+			b.mx.RLock()
+			if b.Block.Data != nil {
+				blk = &b.Block
+			}
+			b.mx.RUnlock()
+		}
+	}
+
+	if blk != nil {
+		sk := cell.CreateProofSkeleton()
+		sk.ProofRef(0).SetRecursive()
+
+		hdrProof, err := blk.Data.CreateProof(sk)
+		if err != nil {
+			return nil, err
+		}
+
+		return &ton.BlockHeader{
+			ID:          blk.ID,
+			Mode:        0,
+			HeaderProof: hdrProof.ToBOCWithFlags(false),
+		}, nil
+	}
+	return nil, nil
+}
+
 func (c *BlockCache) cacheBlockIfNeeded(ctx context.Context, id *ton.BlockIDExt) (*Block, bool, error) {
 	var fromCache bool
 	var data *Block
 	if id.Workchain != -1 {
-		shardKey := getShardKey(id)
+		shardKey := getShardKey(id.Workchain, id.Shard)
 		c.mx.RLock()
 		si := c.shardBlocks[shardKey]
 		b := si.shardBlocks[id.SeqNo]
@@ -749,8 +796,8 @@ func getMasterchainInfo(ctx context.Context, client ton.LiteClient, seqno uint32
 	return nil, fmt.Errorf("unexpected response")
 }
 
-func getShardKey(id *ton.BlockIDExt) string {
-	return fmt.Sprint(id.Workchain) + ":" + fmt.Sprint(id.Shard)
+func getShardKey(wc int32, shard int64) string {
+	return fmt.Sprint(wc) + ":" + fmt.Sprint(shard)
 }
 
 func getBlock(ctx context.Context, client ton.LiteClient, block *ton.BlockIDExt) (*cell.Cell, error) {

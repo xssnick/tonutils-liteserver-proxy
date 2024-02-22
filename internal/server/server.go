@@ -31,6 +31,7 @@ const HitTypeFailedValidate = "failed_validate"
 const HitTypeFailedInternal = "failed_internal"
 
 type Cache interface {
+	LookupBlockInCache(id *ton.BlockInfoShort) (*ton.BlockHeader, error)
 	GetTransaction(ctx context.Context, id *ton.BlockIDExt, account *ton.AccountID, lt int64) (*ton.TransactionInfo, bool, error)
 	GetLibraries(ctx context.Context, hashes [][]byte) (*cell.Dictionary, bool, error)
 	WaitMasterBlock(ctx context.Context, seqno uint32, timeout time.Duration) error
@@ -285,11 +286,12 @@ func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.Server
 						resp, hitType = s.handleGetAccount(ctx, &v)
 					case ton.RunSmcMethod:
 						resp, hitType = s.handleRunSmcMethod(ctx, &v)
+					case ton.LookupBlock:
+						resp, hitType = s.handleLookupBlock(ctx, &v)
 					case ton.GetConfigAll:
 					case ton.GetBlockProof:
 					case ton.GetConfigParams:
 					case ton.GetBlockHeader:
-					case ton.LookupBlock:
 					case ton.GetAllShardsInfo:
 					case ton.ListBlockTransactions:
 					case ton.ListBlockTransactionsExt:
@@ -673,6 +675,27 @@ func (s *ProxyBalancer) handleGetAccount(ctx context.Context, v *ton.GetAccountS
 		return state, HitTypeCache
 	}
 	return state, HitTypeBackend
+}
+
+func (s *ProxyBalancer) handleLookupBlock(ctx context.Context, v *ton.LookupBlock) (tl.Serializable, string) {
+	if v.Mode != 0 {
+		// TODO: support non zero mode too
+		return nil, HitTypeBackend
+	}
+
+	hdr, err := s.cache.LookupBlockInCache(v.ID)
+	if err != nil {
+		return ton.LSError{
+			Code: 500,
+			Text: "failed to lookup block in cache",
+		}, HitTypeFailedInternal
+	}
+
+	if hdr == nil {
+		// not in cache
+		return nil, HitTypeBackend
+	}
+	return hdr, HitTypeCache
 }
 
 func findLibs(code *cell.Cell) (res [][]byte) {
