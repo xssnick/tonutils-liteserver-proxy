@@ -54,7 +54,7 @@ func main() {
 		log.Info().Int("i", i).Str("pub_key", base64.StdEncoding.EncodeToString(key.Public().(ed25519.PublicKey))).Msg("liteserver initialized")
 	}
 
-	blc, err := server.NewBackendBalancer(cfg.Backends, server.BalancerTypeFailOver)
+	blc, err := server.NewBackendBalancer(cfg.Backends, server.BalancerType(cfg.BalancerType))
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to init backend balancer")
 		return

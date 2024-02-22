@@ -25,12 +25,11 @@ type ClientConfig struct {
 }
 
 type CacheConfig struct {
-	DisableProofChainKeyBlocksCache bool
-	DisableGetMethodsEmulation      bool
-	MaxCachedAccountsPerBlock       uint32
-	MaxCachedLibraries              uint32
-	MaxMasterBlockSeqnoDiffToCache  uint32
-	MaxShardBlockSeqnoDiffToCache   uint32
+	DisableGetMethodsEmulation     bool
+	MaxCachedAccountsPerBlock      uint32
+	MaxCachedLibraries             uint32
+	MaxMasterBlockSeqnoDiffToCache uint32
+	MaxShardBlockSeqnoDiffToCache  uint32
 }
 
 type Config struct {
@@ -44,6 +43,7 @@ type Config struct {
 	MaxConnectionsPerIP      uint32
 	MaxKeepAliveSeconds      uint32
 	ResponseGeneralCacheSize uint32
+	BalancerType             string
 }
 
 func LoadConfig(path string) (*Config, error) {
@@ -75,12 +75,12 @@ func LoadConfig(path string) (*Config, error) {
 			MetricsAddr:              "0.0.0.0:8058",
 			MetricsNamespace:         "basic",
 			DisableEmulationAndCache: false,
+			BalancerType:             "fail_over",
 			CacheConfig: CacheConfig{
-				DisableProofChainKeyBlocksCache: false,
-				MaxCachedAccountsPerBlock:       256,
-				MaxCachedLibraries:              8192,
-				MaxMasterBlockSeqnoDiffToCache:  60,
-				MaxShardBlockSeqnoDiffToCache:   12,
+				MaxCachedAccountsPerBlock:      128,
+				MaxCachedLibraries:             8192,
+				MaxMasterBlockSeqnoDiffToCache: 60,
+				MaxShardBlockSeqnoDiffToCache:  60,
 			},
 			Clients: []ClientConfig{
 				{
@@ -88,7 +88,7 @@ func LoadConfig(path string) (*Config, error) {
 					PrivateKey:     private.Seed(),
 					CapacityPerIP:  100,
 					CapacityPerKey: 0,
-					CoolingPerSec:  5,
+					CoolingPerSec:  20,
 				},
 			},
 			Backends: []BackendLiteserver{
@@ -97,9 +97,9 @@ func LoadConfig(path string) (*Config, error) {
 					Key:  exampleKey,
 				},
 			},
-			MaxConnectionsPerIP:      16,
+			MaxConnectionsPerIP:      20,
 			MaxKeepAliveSeconds:      60,
-			ResponseGeneralCacheSize: 1024,
+			ResponseGeneralCacheSize: 2048,
 		}
 
 		err = SaveConfig(cfg, path)
