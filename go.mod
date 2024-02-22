@@ -2,7 +2,7 @@ module github.com/xssnick/tonutils-liteserver-proxy
 
 go 1.19
 
-require github.com/xssnick/tonutils-go v1.8.10-0.20240222114623-aae3cd534cb7
+require github.com/xssnick/tonutils-go v1.8.10-0.20240222121943-dd67285a90c4
 
 require (
 	github.com/beorn7/perks v1.0.1 // indirect
