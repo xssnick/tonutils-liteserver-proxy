@@ -83,6 +83,7 @@ func NewProxyBalancer(configs []config.ClientConfig, backendBalancer *BackendBal
 		onlyProxy:           onlyProxy,
 		maxConnectionsPerIP: maxConnectionsPerIP,
 		maxKeepAlive:        maxKeepAlive,
+		ips:                 map[string]*ClientIPInfo{},
 	}
 
 	var keys []ed25519.PrivateKey
