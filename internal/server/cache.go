@@ -19,6 +19,11 @@ import (
 	"unsafe"
 )
 
+var ErrTimeout = ton.LSError{
+	Code: 652,
+	Text: "timeout",
+}
+
 type MasterBlock struct {
 	Block
 	Config        *cell.Dictionary

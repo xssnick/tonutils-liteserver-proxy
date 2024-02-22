@@ -394,6 +394,9 @@ func (s *ProxyBalancer) handleRunSmcMethod(ctx context.Context, v *ton.RunSmcMet
 		if ls, ok := err.(ton.LSError); ok {
 			return ls, HitTypeFailedValidate
 		}
+		if ctx.Err() != nil {
+			return ErrTimeout, HitTypeFailedValidate
+		}
 
 		log.Warn().Err(err).Type("request", v).Msg("failed to get master block")
 		return ton.LSError{
@@ -407,6 +410,9 @@ func (s *ProxyBalancer) handleRunSmcMethod(ctx context.Context, v *ton.RunSmcMet
 	if err != nil {
 		if ls, ok := err.(ton.LSError); ok {
 			return ls, HitTypeFailedValidate
+		}
+		if ctx.Err() != nil {
+			return ErrTimeout, HitTypeFailedValidate
 		}
 
 		log.Warn().Err(err).Type("request", v).Msg("failed to get account")
@@ -444,6 +450,9 @@ func (s *ProxyBalancer) handleRunSmcMethod(ctx context.Context, v *ton.RunSmcMet
 	if err != nil {
 		if ls, ok := err.(ton.LSError); ok {
 			return ls, HitTypeFailedValidate
+		}
+		if ctx.Err() != nil {
+			return ErrTimeout, HitTypeFailedValidate
 		}
 
 		return ton.LSError{
@@ -536,6 +545,9 @@ func (s *ProxyBalancer) handleGetMasterchainInfoExt(ctx context.Context, v *ton.
 		if ls, ok := err.(ton.LSError); ok {
 			return ls, HitTypeFailedInternal
 		}
+		if ctx.Err() != nil {
+			return ErrTimeout, HitTypeFailedValidate
+		}
 
 		log.Warn().Err(err).Type("request", v).Msg("failed to get last master")
 		return ton.LSError{
@@ -577,6 +589,9 @@ func (s *ProxyBalancer) handleGetMasterchainInfo(ctx context.Context) (tl.Serial
 		if ls, ok := err.(ton.LSError); ok {
 			return ls, HitTypeFailedInternal
 		}
+		if ctx.Err() != nil {
+			return ErrTimeout, HitTypeFailedValidate
+		}
 
 		log.Warn().Err(err).Type("request", ton.GetMasterchainInf{}).Msg("failed to get last master")
 		return ton.LSError{
@@ -611,6 +626,9 @@ func (s *ProxyBalancer) handleGetLibraries(ctx context.Context, v *ton.GetLibrar
 	if err != nil {
 		if ls, ok := err.(ton.LSError); ok {
 			return ls, HitTypeFailedValidate
+		}
+		if ctx.Err() != nil {
+			return ErrTimeout, HitTypeFailedValidate
 		}
 
 		log.Warn().Err(err).Type("request", v).Msg("failed to get libraries")
@@ -653,6 +671,9 @@ func (s *ProxyBalancer) handleGetBlock(ctx context.Context, v *ton.GetBlockData)
 		if ls, ok := err.(ton.LSError); ok {
 			return ls, HitTypeFailedValidate
 		}
+		if ctx.Err() != nil {
+			return ErrTimeout, HitTypeFailedValidate
+		}
 
 		log.Warn().Err(err).Type("request", v).Msg("failed to get block")
 		return ton.LSError{
@@ -672,6 +693,9 @@ func (s *ProxyBalancer) handleGetTransaction(ctx context.Context, v *ton.GetOneT
 	if err != nil {
 		if ls, ok := err.(ton.LSError); ok {
 			return ls, HitTypeFailedValidate
+		}
+		if ctx.Err() != nil {
+			return ErrTimeout, HitTypeFailedValidate
 		}
 
 		log.Warn().Err(err).Type("request", v).Msg("failed to get transaction")
@@ -698,6 +722,9 @@ func (s *ProxyBalancer) handleGetAccount(ctx context.Context, v *ton.GetAccountS
 		if ls, ok := err.(ton.LSError); ok {
 			return ls, HitTypeFailedValidate
 		}
+		if ctx.Err() != nil {
+			return ErrTimeout, HitTypeFailedValidate
+		}
 
 		log.Warn().Err(err).Type("request", v).Msg("failed to get master block")
 		return ton.LSError{
@@ -710,6 +737,9 @@ func (s *ProxyBalancer) handleGetAccount(ctx context.Context, v *ton.GetAccountS
 	if err != nil {
 		if ls, ok := err.(ton.LSError); ok {
 			return ls, HitTypeFailedValidate
+		}
+		if ctx.Err() != nil {
+			return ErrTimeout, HitTypeFailedValidate
 		}
 
 		log.Warn().Err(err).Type("request", v).Msg("failed to get account state")
