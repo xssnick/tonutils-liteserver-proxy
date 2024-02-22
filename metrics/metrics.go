@@ -28,7 +28,7 @@ func InitMetrics(namespace, subsystem string) {
 			Subsystem: subsystem,
 			Name:      "adnl_requests",
 			Help:      "Raw ADNL requests",
-		}, []string{"key_name", "request_type"}),
+		}, []string{"key_name", "request_type", "limited"}),
 		LSErrors: promauto.NewCounterVec(prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: subsystem,

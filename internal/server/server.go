@@ -105,35 +105,23 @@ func (s *ProxyBalancer) Listen(addr string) error {
 
 func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.ServerClient, msg tl.Serializable) error {
 	lim := s.configs[string(sc.ServerKey())]
-	keyName := "unknown"
-	if lim != nil {
-		keyName = lim.name
+	if lim == nil {
+		return fmt.Errorf("unknown server key")
 	}
 
+	limited := false
 	defer func() {
-		metrics.Global.Requests.WithLabelValues(keyName, reflect.TypeOf(msg).String()).Add(1)
+		metrics.Global.Requests.WithLabelValues(lim.name, reflect.TypeOf(msg).String(), fmt.Sprint(limited)).Add(1)
 	}()
 
 	switch m := msg.(type) {
 	case adnl.MessageQuery:
 		switch q := m.Data.(type) {
 		case liteclient.LiteServerQuery:
-			if lim == nil {
-				return sc.Send(adnl.MessageAnswer{ID: m.ID, Data: ton.LSError{
-					Code: 401,
-					Text: "unexpected server key",
-				}})
-			}
-
 			cost := int64(1) // TODO: dynamic cost (depending on query)
 
-			if lim.limiterPerIP != nil && lim.limiterPerIP.Add(sc.IP(), cost) != cost {
-				return sc.Send(adnl.MessageAnswer{ID: m.ID, Data: ton.LSError{
-					Code: 429,
-					Text: "too many requests",
-				}})
-			}
-			if lim.limiterPerKey != nil && lim.limiterPerKey.Add(cost) != cost {
+			if lim.limiterPerIP != nil && (lim.limiterPerIP.Add(sc.IP(), cost) != cost || lim.limiterPerKey.Add(cost) != cost) {
+				limited = true
 				return sc.Send(adnl.MessageAnswer{ID: m.ID, Data: ton.LSError{
 					Code: 429,
 					Text: "too many requests",
@@ -179,11 +167,11 @@ func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.Server
 					tm := time.Now()
 					defer func() {
 						if ls, ok := resp.(ton.LSError); ok {
-							metrics.Global.LSErrors.WithLabelValues(keyName, reflect.TypeOf(q.Data).String(), fmt.Sprint(ls.Code)).Add(1)
+							metrics.Global.LSErrors.WithLabelValues(lim.name, reflect.TypeOf(q.Data).String(), fmt.Sprint(ls.Code)).Add(1)
 						}
 
 						snc := time.Since(tm)
-						metrics.Global.Queries.WithLabelValues(keyName, reflect.TypeOf(q.Data).String(), hitType).Observe(snc.Seconds())
+						metrics.Global.Queries.WithLabelValues(lim.name, reflect.TypeOf(q.Data).String(), hitType).Observe(snc.Seconds())
 						log.Debug().Type("request", q.Data).Dur("took", snc).Msg("query finished")
 					}()
 
