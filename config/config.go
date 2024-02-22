@@ -26,6 +26,7 @@ type ClientConfig struct {
 
 type CacheConfig struct {
 	DisableProofChainKeyBlocksCache bool
+	DisableGetMethodsEmulation      bool
 	MaxCachedAccountsPerBlock       uint32
 	MaxCachedLibraries              uint32
 	MaxMasterBlockSeqnoDiffToCache  uint32

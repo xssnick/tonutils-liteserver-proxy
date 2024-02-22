@@ -306,6 +306,13 @@ func (s *ProxyBalancer) handleRunSmcMethod(ctx context.Context, v *ton.RunSmcMet
 		}, HitTypeFailedInternal
 	}
 
+	if st.StateInit == nil || st.StateInit.Code == nil {
+		return ton.LSError{
+			Code: ton.ErrCodeContractNotInitialized,
+			Text: "contract is not initialized",
+		}, HitTypeFailedValidate
+	}
+
 	libsCodes, cachedLibs, err := s.cache.GetLibraries(ctx, findLibs(st.StateInit.Code))
 	if err != nil {
 		if ls, ok := err.(ton.LSError); ok {
