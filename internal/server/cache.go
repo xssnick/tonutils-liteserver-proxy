@@ -490,9 +490,12 @@ func (c *BlockCache) LookupBlockInCache(id *ton.BlockInfoShort) (*ton.BlockHeade
 			b.mx.RUnlock()
 		}
 	} else {
+		var b *ShardBlock
 		c.mx.RLock()
 		si := c.shardBlocks[getShardKey(id.Workchain, id.Shard)]
-		b := si.shardBlocks[uint32(id.Seqno)]
+		if si != nil {
+			b = si.shardBlocks[uint32(id.Seqno)]
+		}
 		c.mx.RUnlock()
 
 		if b != nil {
@@ -527,9 +530,12 @@ func (c *BlockCache) cacheBlockIfNeeded(ctx context.Context, id *ton.BlockIDExt)
 	var data *Block
 	if id.Workchain != -1 {
 		shardKey := getShardKey(id.Workchain, id.Shard)
+		var b *ShardBlock
 		c.mx.RLock()
 		si := c.shardBlocks[shardKey]
-		b := si.shardBlocks[id.SeqNo]
+		if si != nil {
+			b = si.shardBlocks[id.SeqNo]
+		}
 		needCache := si != nil && id.SeqNo >= si.lastBlock.SeqNo-c.config.MaxShardBlockSeqnoDiffToCache
 		c.mx.RUnlock()
 
