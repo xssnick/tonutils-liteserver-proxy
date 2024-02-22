@@ -519,7 +519,7 @@ func (c *BlockCache) LookupBlockInCache(id *ton.BlockInfoShort) (*ton.BlockHeade
 		return &ton.BlockHeader{
 			ID:          blk.ID,
 			Mode:        0,
-			HeaderProof: hdrProof.ToBOCWithFlags(false),
+			HeaderProof: hdrProof,
 		}, nil
 	}
 	return nil, nil
