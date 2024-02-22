@@ -130,7 +130,7 @@ func NewProxyBalancer(configs []config.ClientConfig, backendBalancer *BackendBal
 			LastRequest: time.Now().Unix(),
 		}
 
-		log.Debug().Str("addr", ip).Msg("new client connected")
+		log.Debug().Str("addr", ip).Uint16("port", client.Port()).Int("connections", len(info.ActiveConnections)).Msg("new client connected")
 		metrics.Global.ActiveADNLConnections.Add(1)
 
 		return nil
