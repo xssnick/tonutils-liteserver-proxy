@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"fmt"
+	lru "github.com/hashicorp/golang-lru"
 	"github.com/kevinms/leakybucket-go"
 	"github.com/rs/zerolog/log"
 	"github.com/xssnick/tonutils-go/address"
@@ -17,6 +18,7 @@ import (
 	"github.com/xssnick/tonutils-liteserver-proxy/config"
 	"github.com/xssnick/tonutils-liteserver-proxy/internal/emulate"
 	"github.com/xssnick/tonutils-liteserver-proxy/metrics"
+	"hash/crc64"
 	"reflect"
 	"strings"
 	"sync"
@@ -27,6 +29,7 @@ import (
 const HitTypeEmulated = "emulated"
 const HitTypeBackend = "backend"
 const HitTypeCache = "cache"
+const HitTypeGPCache = "gp_cache"
 const HitTypeFailedValidate = "failed_validate"
 const HitTypeFailedInternal = "failed_internal"
 
@@ -67,6 +70,8 @@ type ProxyBalancer struct {
 	maxConnectionsPerIP int
 	maxKeepAlive        time.Duration
 
+	gpCache *lru.ARCCache
+
 	mx sync.RWMutex
 }
 
@@ -76,7 +81,7 @@ type KeyConfig struct {
 	limiterPerKey *leakybucket.LeakyBucket
 }
 
-func NewProxyBalancer(configs []config.ClientConfig, backendBalancer *BackendBalancer, cache Cache, onlyProxy bool, maxConnectionsPerIP int, maxKeepAlive time.Duration) *ProxyBalancer {
+func NewProxyBalancer(configs []config.ClientConfig, backendBalancer *BackendBalancer, cache Cache, onlyProxy bool, maxConnectionsPerIP int, maxKeepAlive time.Duration, gpCacheSize int) *ProxyBalancer {
 	s := &ProxyBalancer{
 		backendBalancer:     backendBalancer,
 		configs:             map[string]*KeyConfig{},
@@ -85,6 +90,14 @@ func NewProxyBalancer(configs []config.ClientConfig, backendBalancer *BackendBal
 		maxConnectionsPerIP: maxConnectionsPerIP,
 		maxKeepAlive:        maxKeepAlive,
 		ips:                 map[string]*ClientIPInfo{},
+	}
+
+	if gpCacheSize > 0 {
+		var err error
+		s.gpCache, err = lru.NewARC(gpCacheSize)
+		if err != nil {
+			panic("failed to init general purpose cache: " + err.Error())
+		}
 	}
 
 	var keys []ed25519.PrivateKey
@@ -178,6 +191,8 @@ func (s *ProxyBalancer) Listen(addr string) error {
 	return s.srv.Listen(addr)
 }
 
+var crcTable = crc64.MakeTable(crc64.ECMA)
+
 func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.ServerClient, msg tl.Serializable) error {
 	lim := s.configs[string(sc.ServerKey())]
 	if lim == nil {
@@ -214,6 +229,8 @@ func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.Server
 			go func() {
 				var resp tl.Serializable
 
+				tm := time.Now()
+				hitType := HitTypeBackend
 				if !s.onlyProxy {
 					switch v := q.Data.(type) {
 					case []tl.Serializable: // wait master probably
@@ -234,7 +251,7 @@ func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.Server
 							return
 						}
 
-						tm := time.Now()
+						tmWait := time.Now()
 						if err := s.cache.WaitMasterBlock(ctx, uint32(wt.Seqno), time.Duration(wt.Timeout)*time.Second); err != nil {
 							if ls, ok := err.(ton.LSError); ok {
 								_ = sc.Send(adnl.MessageAnswer{ID: m.ID, Data: ls})
@@ -242,21 +259,12 @@ func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.Server
 							}
 							return
 						}
-						log.Debug().Dur("took", time.Since(tm)).Msg("master block wait finished")
+						log.Debug().Dur("took", time.Since(tmWait)).Msg("master block wait finished")
 						q.Data = v[1]
+
+						// reset time to not track waiting time
+						tm = time.Now()
 					}
-
-					hitType := HitTypeBackend
-					tm := time.Now()
-					defer func() {
-						if ls, ok := resp.(ton.LSError); ok {
-							metrics.Global.LSErrors.WithLabelValues(lim.name, reflect.TypeOf(q.Data).String(), fmt.Sprint(ls.Code)).Add(1)
-						}
-
-						snc := time.Since(tm)
-						metrics.Global.Queries.WithLabelValues(lim.name, reflect.TypeOf(q.Data).String(), hitType).Observe(snc.Seconds())
-						log.Debug().Type("request", q.Data).Dur("took", snc).Msg("query finished")
-					}()
 
 					switch v := q.Data.(type) {
 					case ton.GetVersion:
@@ -288,14 +296,48 @@ func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.Server
 						resp, hitType = s.handleRunSmcMethod(ctx, &v)
 					case ton.LookupBlock:
 						resp, hitType = s.handleLookupBlock(ctx, &v)
+					case ton.GetBlockHeader:
+						resp, hitType = s.handleLookupBlock(ctx, &ton.LookupBlock{
+							Mode: 0,
+							ID:   v.ID,
+						})
 					case ton.GetConfigAll:
 					case ton.GetBlockProof:
 					case ton.GetConfigParams:
-					case ton.GetBlockHeader:
 					case ton.GetAllShardsInfo:
 					case ton.ListBlockTransactions:
 					case ton.ListBlockTransactionsExt:
 						// TODO: cache all of this
+					}
+				}
+
+				defer func() {
+					if ls, ok := resp.(ton.LSError); ok {
+						metrics.Global.LSErrors.WithLabelValues(lim.name, reflect.TypeOf(q.Data).String(), fmt.Sprint(ls.Code)).Add(1)
+					}
+
+					snc := time.Since(tm)
+					metrics.Global.Queries.WithLabelValues(lim.name, reflect.TypeOf(q.Data).String(), hitType).Observe(snc.Seconds())
+					log.Debug().Type("request", q.Data).Dur("took", snc).Msg("query finished")
+				}()
+
+				var gpKey uint64
+				if resp == nil && s.gpCache != nil {
+					rqData, err := tl.Serialize(q.Data, true)
+					if err != nil {
+						log.Warn().Type("request", q.Data).Msg("serialization for hash failed")
+
+						resp = ton.LSError{
+							Code: 400,
+							Text: "request serialization failed",
+						}
+					}
+					gpKey = crc64.Checksum(rqData, crcTable)
+
+					resp, _ = s.gpCache.Get(gpKey)
+					if resp != nil {
+						log.Debug().Type("request", q.Data).Type("response", resp).Msg("fetched from gp cache")
+						hitType = HitTypeGPCache
 					}
 				}
 
@@ -304,7 +346,7 @@ func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.Server
 					// we expect to have only fast nodes, so timeout is short
 					ctx, cancel := context.WithTimeout(ctx, 7*time.Second)
 
-					tm := time.Now()
+					lsTm := time.Now()
 					err := s.backendBalancer.GetClient().QueryLiteserver(ctx, q.Data, &resp)
 					cancel()
 					if err != nil {
@@ -316,13 +358,15 @@ func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.Server
 								Text: "canceled",
 							}
 						} else {
-							log.Warn().Err(err).Type("request", q.Data).Dur("took", time.Since(tm)).Msg("query failed")
+							log.Warn().Err(err).Type("request", q.Data).Dur("took", time.Since(lsTm)).Msg("query failed")
 
 							resp = ton.LSError{
 								Code: 502,
 								Text: "backend node timeout",
 							}
 						}
+					} else if s.gpCache != nil {
+						s.gpCache.Add(gpKey, resp)
 					}
 				}
 
@@ -339,6 +383,11 @@ func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.Server
 }
 
 func (s *ProxyBalancer) handleRunSmcMethod(ctx context.Context, v *ton.RunSmcMethod) (tl.Serializable, string) {
+	if v.Mode&8 != 0 {
+		//TODO: support c7 return
+		return nil, HitTypeBackend
+	}
+
 	block, cachedMaster, err := s.cache.GetMasterBlock(ctx, v.ID)
 	if err != nil {
 		if ls, ok := err.(ton.LSError); ok {
@@ -438,13 +487,6 @@ func (s *ProxyBalancer) handleRunSmcMethod(ctx context.Context, v *ton.RunSmcMet
 	log.Debug().Dur("took", time.Since(etm)).Msg("get method emulation finished")
 
 	var stateProof, c7 *cell.Cell
-	if v.Mode&8 != 0 {
-		//TODO: support c7 return
-		return ton.LSError{
-			Code: 403,
-			Text: "c7 return is currently not supported",
-		}, HitTypeFailedValidate + "_want_c7"
-	}
 
 	if v.Mode&2 != 0 {
 		stateProof, err = state.State.CreateProof(cell.CreateProofSkeleton())
@@ -679,12 +721,15 @@ func (s *ProxyBalancer) handleGetAccount(ctx context.Context, v *ton.GetAccountS
 
 func (s *ProxyBalancer) handleLookupBlock(ctx context.Context, v *ton.LookupBlock) (tl.Serializable, string) {
 	if v.Mode != 0 {
+		log.Debug().Msg("requested lookup block with non zero mode")
 		// TODO: support non zero mode too
 		return nil, HitTypeBackend
 	}
 
 	hdr, err := s.cache.LookupBlockInCache(v.ID)
 	if err != nil {
+		log.Warn().Err(err).Type("request", v).Msg("failed to get lookup block in cache")
+
 		return ton.LSError{
 			Code: 500,
 			Text: "failed to lookup block in cache",
@@ -693,6 +738,7 @@ func (s *ProxyBalancer) handleLookupBlock(ctx context.Context, v *ton.LookupBloc
 
 	if hdr == nil {
 		// not in cache
+		log.Debug().Msg("lookup block cache miss")
 		return nil, HitTypeBackend
 	}
 	return hdr, HitTypeCache

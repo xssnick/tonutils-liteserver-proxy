@@ -43,6 +43,7 @@ type Config struct {
 	Backends                 []BackendLiteserver
 	MaxConnectionsPerIP      uint32
 	MaxKeepAliveSeconds      uint32
+	ResponseGeneralCacheSize uint32
 }
 
 func LoadConfig(path string) (*Config, error) {
@@ -96,8 +97,9 @@ func LoadConfig(path string) (*Config, error) {
 					Key:  exampleKey,
 				},
 			},
-			MaxConnectionsPerIP: 16,
-			MaxKeepAliveSeconds: 60,
+			MaxConnectionsPerIP:      16,
+			MaxKeepAliveSeconds:      60,
+			ResponseGeneralCacheSize: 1024,
 		}
 
 		err = SaveConfig(cfg, path)
