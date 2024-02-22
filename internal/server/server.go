@@ -297,10 +297,6 @@ func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.Server
 					case ton.LookupBlock:
 						resp, hitType = s.handleLookupBlock(ctx, &v)
 					case ton.GetBlockHeader:
-						resp, hitType = s.handleLookupBlock(ctx, &ton.LookupBlock{
-							Mode: 0,
-							ID:   v.ID,
-						})
 					case ton.GetConfigAll:
 					case ton.GetBlockProof:
 					case ton.GetConfigParams:
@@ -720,8 +716,8 @@ func (s *ProxyBalancer) handleGetAccount(ctx context.Context, v *ton.GetAccountS
 }
 
 func (s *ProxyBalancer) handleLookupBlock(ctx context.Context, v *ton.LookupBlock) (tl.Serializable, string) {
-	if v.Mode != 0 {
-		log.Debug().Msg("requested lookup block with non zero mode")
+	if v.Mode != 1 {
+		log.Debug().Msg("requested lookup block with non 1 mode")
 		// TODO: support non zero mode too
 		return nil, HitTypeBackend
 	}
