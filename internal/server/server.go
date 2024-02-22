@@ -17,8 +17,10 @@ import (
 	"github.com/xssnick/tonutils-liteserver-proxy/config"
 	"github.com/xssnick/tonutils-liteserver-proxy/internal/emulate"
 	"github.com/xssnick/tonutils-liteserver-proxy/metrics"
-	"net"
 	"reflect"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -43,13 +45,28 @@ type Client struct {
 	processor chan *liteclient.LiteServerQuery
 }
 
+type ClientConnInfo struct {
+	Client      *liteclient.ServerClient
+	LastRequest int64
+}
+
+type ClientIPInfo struct {
+	ActiveConnections map[uint16]*ClientConnInfo
+}
+
 type ProxyBalancer struct {
 	srv             *liteclient.Server
 	backendBalancer *BackendBalancer
 
-	cache     Cache
-	configs   map[string]*KeyConfig
-	onlyProxy bool
+	ips map[string]*ClientIPInfo
+
+	cache               Cache
+	configs             map[string]*KeyConfig
+	onlyProxy           bool
+	maxConnectionsPerIP int
+	maxKeepAlive        time.Duration
+
+	mx sync.RWMutex
 }
 
 type KeyConfig struct {
@@ -58,12 +75,14 @@ type KeyConfig struct {
 	limiterPerKey *leakybucket.LeakyBucket
 }
 
-func NewProxyBalancer(configs []config.ClientConfig, backendBalancer *BackendBalancer, cache Cache, onlyProxy bool) *ProxyBalancer {
+func NewProxyBalancer(configs []config.ClientConfig, backendBalancer *BackendBalancer, cache Cache, onlyProxy bool, maxConnectionsPerIP int, maxKeepAlive time.Duration) *ProxyBalancer {
 	s := &ProxyBalancer{
-		backendBalancer: backendBalancer,
-		configs:         map[string]*KeyConfig{},
-		cache:           cache,
-		onlyProxy:       onlyProxy,
+		backendBalancer:     backendBalancer,
+		configs:             map[string]*KeyConfig{},
+		cache:               cache,
+		onlyProxy:           onlyProxy,
+		maxConnectionsPerIP: maxConnectionsPerIP,
+		maxKeepAlive:        maxKeepAlive,
 	}
 
 	var keys []ed25519.PrivateKey
@@ -86,16 +105,70 @@ func NewProxyBalancer(configs []config.ClientConfig, backendBalancer *BackendBal
 	s.srv = liteclient.NewServer(keys)
 
 	s.srv.SetMessageHandler(s.handleRequest)
-	s.srv.SetConnectionHook(func(conn net.Conn) error {
-		// TODO: ip filtering?
-		log.Debug().Str("addr", conn.RemoteAddr().String()).Msg("new client connected")
+	s.srv.SetConnectionHook(func(client *liteclient.ServerClient) error {
+		ip := client.IP()
+
+		s.mx.Lock()
+		defer s.mx.Unlock()
+
+		info := s.ips[ip]
+		if info == nil {
+			info = &ClientIPInfo{
+				ActiveConnections: map[uint16]*ClientConnInfo{},
+			}
+			s.ips[ip] = info
+		}
+
+		if s.maxConnectionsPerIP > 0 && len(info.ActiveConnections) >= s.maxConnectionsPerIP {
+			log.Debug().Str("addr", ip).Msg("client connection refused, too many connections")
+
+			return fmt.Errorf("too many connections")
+		}
+		info.ActiveConnections[client.Port()] = &ClientConnInfo{
+			Client:      client,
+			LastRequest: time.Now().Unix(),
+		}
+
+		log.Debug().Str("addr", ip).Msg("new client connected")
 		metrics.Global.ActiveADNLConnections.Add(1)
+
 		return nil
 	})
-	s.srv.SetDisconnectHook(func(ctx context.Context, client *liteclient.ServerClient) {
-		log.Debug().Str("addr", client.IP()).Msg("client disconnected")
+	s.srv.SetDisconnectHook(func(client *liteclient.ServerClient) {
+		ip := client.IP()
+		s.mx.Lock()
+		if info := s.ips[ip]; info != nil {
+			delete(info.ActiveConnections, client.Port())
+			if len(info.ActiveConnections) == 0 {
+				delete(s.ips, ip)
+			}
+		}
+		s.mx.Unlock()
+
+		log.Debug().Str("addr", ip).Msg("client disconnected")
 		metrics.Global.ActiveADNLConnections.Sub(1)
 	})
+
+	if s.maxKeepAlive > 0 {
+		go func() {
+			for {
+				start := time.Now()
+				last := start.Add(-s.maxKeepAlive).Unix()
+				s.mx.Lock()
+				for _, ip := range s.ips {
+					for _, client := range ip.ActiveConnections {
+						if client.LastRequest < last {
+							client.Client.Close()
+						}
+					}
+				}
+				s.mx.Unlock()
+				log.Debug().Str("took", time.Since(start).String()).Msg("connections cleanup completed")
+
+				time.Sleep(5 * time.Second)
+			}
+		}()
+	}
 	return s
 }
 
@@ -108,6 +181,14 @@ func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.Server
 	if lim == nil {
 		return fmt.Errorf("unknown server key")
 	}
+
+	s.mx.RLock()
+	if ip := s.ips[sc.IP()]; ip != nil {
+		if conn := ip.ActiveConnections[sc.Port()]; conn != nil {
+			atomic.StoreInt64(&conn.LastRequest, time.Now().Unix())
+		}
+	}
+	s.mx.RUnlock()
 
 	limited := false
 	defer func() {
@@ -226,6 +307,11 @@ func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.Server
 					if err != nil {
 						if ls, ok := err.(ton.LSError); ok {
 							resp = ls
+						} else if strings.HasSuffix(err.Error(), "context canceled") {
+							resp = ton.LSError{
+								Code: 400,
+								Text: "canceled",
+							}
 						} else {
 							log.Warn().Err(err).Type("request", q.Data).Dur("took", time.Since(tm)).Msg("query failed")
 

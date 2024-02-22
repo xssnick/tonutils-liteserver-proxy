@@ -13,6 +13,7 @@ import (
 	"github.com/xssnick/tonutils-liteserver-proxy/internal/server"
 	"github.com/xssnick/tonutils-liteserver-proxy/metrics"
 	"net/http"
+	"time"
 )
 
 var (
@@ -72,7 +73,8 @@ func main() {
 	}()
 
 	log.Info().Str("addr", cfg.ListenAddr).Msg("listening tcp")
-	proxy := server.NewProxyBalancer(cfg.Clients, blc, cache, cfg.DisableEmulationAndCache)
+	proxy := server.NewProxyBalancer(cfg.Clients, blc, cache,
+		cfg.DisableEmulationAndCache, int(cfg.MaxConnectionsPerIP), time.Duration(cfg.MaxKeepAliveSeconds)*time.Second)
 	if err = proxy.Listen(cfg.ListenAddr); err != nil {
 		log.Fatal().Err(err).Msg("listen failed")
 		return

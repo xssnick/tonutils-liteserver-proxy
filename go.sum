@@ -41,6 +41,10 @@ github.com/xssnick/tonutils-go v1.8.10-0.20240221101823-9f517fa2e632 h1:98+oU6yd
 github.com/xssnick/tonutils-go v1.8.10-0.20240221101823-9f517fa2e632/go.mod h1:p1l1Bxdv9sz6x2jfbuGQUGJn6g5cqg7xsTp8rBHFoJY=
 github.com/xssnick/tonutils-go v1.8.10-0.20240221121220-f597f66c1edd h1:TJDcT9ZSSVTjjQKHLq2zlXhNuRCywf2dswQRFnKLgeQ=
 github.com/xssnick/tonutils-go v1.8.10-0.20240221121220-f597f66c1edd/go.mod h1:p1l1Bxdv9sz6x2jfbuGQUGJn6g5cqg7xsTp8rBHFoJY=
+github.com/xssnick/tonutils-go v1.8.10-0.20240222113325-e22b86dfe4ee h1:D+V6oUbU9FFFAwY6cDddvfEtYaL25myYgYQJnXGKEtQ=
+github.com/xssnick/tonutils-go v1.8.10-0.20240222113325-e22b86dfe4ee/go.mod h1:p1l1Bxdv9sz6x2jfbuGQUGJn6g5cqg7xsTp8rBHFoJY=
+github.com/xssnick/tonutils-go v1.8.10-0.20240222114623-aae3cd534cb7 h1:KLo8KwrmvW8DNWmzs+pZ8DmKtG8v0d0yRnKR96IZ6T4=
+github.com/xssnick/tonutils-go v1.8.10-0.20240222114623-aae3cd534cb7/go.mod h1:p1l1Bxdv9sz6x2jfbuGQUGJn6g5cqg7xsTp8rBHFoJY=
 golang.org/x/crypto v0.17.0 h1:r8bRNjWL3GshPW3gkd+RpvzWrZAwPS49OmTGZ/uhM4k=
 golang.org/x/crypto v0.17.0/go.mod h1:gCAAfMLgwOJRpTjQ2zCCt2OcSfYMTeZVSRtQlPC7Nq4=
 golang.org/x/sys v0.0.0-20220811171246-fbc7d0a398ab/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=

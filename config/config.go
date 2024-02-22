@@ -41,6 +41,8 @@ type Config struct {
 	CacheConfig              CacheConfig
 	Clients                  []ClientConfig
 	Backends                 []BackendLiteserver
+	MaxConnectionsPerIP      uint32
+	MaxKeepAliveSeconds      uint32
 }
 
 func LoadConfig(path string) (*Config, error) {
@@ -72,6 +74,13 @@ func LoadConfig(path string) (*Config, error) {
 			MetricsAddr:              "0.0.0.0:8058",
 			MetricsNamespace:         "basic",
 			DisableEmulationAndCache: false,
+			CacheConfig: CacheConfig{
+				DisableProofChainKeyBlocksCache: false,
+				MaxCachedAccountsPerBlock:       256,
+				MaxCachedLibraries:              8192,
+				MaxMasterBlockSeqnoDiffToCache:  60,
+				MaxShardBlockSeqnoDiffToCache:   12,
+			},
 			Clients: []ClientConfig{
 				{
 					Name:           "default",
@@ -87,13 +96,8 @@ func LoadConfig(path string) (*Config, error) {
 					Key:  exampleKey,
 				},
 			},
-			CacheConfig: CacheConfig{
-				DisableProofChainKeyBlocksCache: false,
-				MaxCachedAccountsPerBlock:       256,
-				MaxCachedLibraries:              8192,
-				MaxMasterBlockSeqnoDiffToCache:  60,
-				MaxShardBlockSeqnoDiffToCache:   12,
-			},
+			MaxConnectionsPerIP: 16,
+			MaxKeepAliveSeconds: 60,
 		}
 
 		err = SaveConfig(cfg, path)

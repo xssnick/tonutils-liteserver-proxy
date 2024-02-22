@@ -272,8 +272,12 @@ func (c *BlockCache) GetMasterBlock(ctx context.Context, id *ton.BlockIDExt) (*M
 		c.mx.RUnlock()
 
 		if prev != nil {
+			prev.mx.RLock()
 			cfg = prev.Config
-		} else {
+			prev.mx.RUnlock()
+		}
+
+		if cfg == nil {
 			// fetch config directly, because we don't know current
 			cfg, err = getBlockchainConfig(ctx, c.balancer.GetClient(), id)
 			if err != nil {
