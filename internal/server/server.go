@@ -379,6 +379,11 @@ func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.Server
 }
 
 func (s *ProxyBalancer) handleRunSmcMethod(ctx context.Context, v *ton.RunSmcMethod) (tl.Serializable, string) {
+	if v.ID.Workchain != -1 {
+		// TODO: account state on shard block level
+		return nil, HitTypeBackend
+	}
+
 	if v.Mode&8 != 0 {
 		//TODO: support c7 return
 		return nil, HitTypeBackend
