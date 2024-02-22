@@ -120,7 +120,7 @@ func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.Server
 		case liteclient.LiteServerQuery:
 			cost := int64(1) // TODO: dynamic cost (depending on query)
 
-			if lim.limiterPerIP != nil && (lim.limiterPerIP.Add(sc.IP(), cost) != cost || lim.limiterPerKey.Add(cost) != cost) {
+			if (lim.limiterPerIP != nil && lim.limiterPerIP.Add(sc.IP(), cost) != cost) || (lim.limiterPerKey != nil && lim.limiterPerKey.Add(cost) != cost) {
 				limited = true
 				return sc.Send(adnl.MessageAnswer{ID: m.ID, Data: ton.LSError{
 					Code: 429,
