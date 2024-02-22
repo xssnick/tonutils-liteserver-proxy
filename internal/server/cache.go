@@ -189,7 +189,7 @@ func (c *BlockCache) GetLibraries(ctx context.Context, hashes [][]byte) (*cell.D
 
 func (c *BlockCache) GetMasterBlock(ctx context.Context, id *ton.BlockIDExt) (*MasterBlock, bool, error) {
 	if id.Workchain != -1 {
-		return nil, false, fmt.Errorf("not a mster id")
+		return nil, false, fmt.Errorf("not a master workchain: %d %d", id.Workchain, id.SeqNo)
 	}
 
 	var lastSeqno uint32
