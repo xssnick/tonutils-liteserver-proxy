@@ -462,6 +462,14 @@ func (c *BlockCache) GetAccountState(ctx context.Context, id *ton.BlockIDExt, ad
 		return nil, false, err
 	}
 
+	if block == nil {
+		account, err := getAccount(ctx, c.balancer.GetClient(), block.ID, addr)
+		if err != nil {
+			return nil, false, err
+		}
+		return account, false, nil
+	}
+
 	acc, cached, err := c.GetAccountStateInBlock(ctx, block, addr)
 	if err != nil {
 		return nil, false, err
@@ -477,7 +485,7 @@ func (c *BlockCache) GetAccountState(ctx context.Context, id *ton.BlockIDExt, ad
 func (c *BlockCache) GetAccountStateInBlock(ctx context.Context, block *Block, addr *address.Address) (*ton.AccountState, bool, error) {
 	addrStr := addr.String()
 
-	if block != nil && block.accountsCache != nil {
+	if block.accountsCache != nil {
 		acc, ok := block.accountsCache.Get(addrStr)
 		if ok {
 			return acc.(*ton.AccountState), true, nil
@@ -489,7 +497,7 @@ func (c *BlockCache) GetAccountStateInBlock(ctx context.Context, block *Block, a
 		return nil, false, err
 	}
 
-	if block != nil && block.accountsCache != nil {
+	if block.accountsCache != nil {
 		block.accountsCache.Add(addrStr, account)
 	}
 
