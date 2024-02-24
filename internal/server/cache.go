@@ -463,7 +463,7 @@ func (c *BlockCache) GetAccountState(ctx context.Context, id *ton.BlockIDExt, ad
 	}
 
 	if block == nil {
-		account, err := getAccount(ctx, c.balancer.GetClient(), block.ID, addr)
+		account, err := getAccount(ctx, c.balancer.GetClient(), id, addr)
 		if err != nil {
 			return nil, false, err
 		}
