@@ -9,29 +9,26 @@ package emulate
 import "C"
 
 import (
-	"encoding/base64"
 	"fmt"
 	"github.com/xssnick/tonutils-go/address"
 	"github.com/xssnick/tonutils-go/tlb"
 	"github.com/xssnick/tonutils-go/tvm/cell"
+	"math/big"
+	"time"
 	"unsafe"
 )
 
 type MethodConfig struct {
-	Config *cell.Cell `tlb:"^"`
-	Libs   *cell.Cell `tlb:"^"`
+	C7   *cell.Cell `tlb:"^"`
+	Libs *cell.Cell `tlb:"^"`
 }
 
 type RunMethodParams struct {
-	Code     *cell.Cell       `tlb:"^"`
-	Data     *cell.Cell       `tlb:"^"`
-	Address  *address.Address `tlb:"addr"`
-	Stack    *cell.Cell       `tlb:"^"`
-	Balance  uint64           `tlb:"## 64"`
-	Params   MethodConfig     `tlb:"^"`
-	MethodID int32            `tlb:"## 32"`
-	Time     uint32           `tlb:"## 32"`
-	RandSeed []byte           `tlb:"bits 256"`
+	Code     *cell.Cell   `tlb:"^"`
+	Data     *cell.Cell   `tlb:"^"`
+	Stack    *cell.Cell   `tlb:"^"`
+	Params   MethodConfig `tlb:"^"`
+	MethodID int32        `tlb:"## 32"`
 }
 
 type RunResult struct {
@@ -46,7 +43,7 @@ func init() {
 	C.emulator_set_verbosity_level(0)
 }
 
-func RunGetMethod(params RunMethodParams, withC7 bool, maxGas int64) (*RunResult, error) {
+func RunGetMethod(params RunMethodParams, maxGas int64) (*RunResult, error) {
 	req, err := tlb.ToCell(params)
 	if err != nil {
 		return nil, err
@@ -77,67 +74,28 @@ func RunGetMethod(params RunMethodParams, withC7 bool, maxGas int64) (*RunResult
 	return &result, nil
 }
 
-func b64(c *cell.Cell) string {
-	return base64.StdEncoding.EncodeToString(c.ToBOCWithFlags(false))
-}
+func PrepareC7(addr *address.Address, tm time.Time, seed []byte, balance *big.Int, cfg *cell.Dictionary, code *cell.Cell) (*cell.Cell, error) {
+	if len(seed) != 32 {
+		return nil, fmt.Errorf("seed len is not 32")
+	}
 
-func prepareC7() {
-	/*
+	var tuple = make([]any, 0, 14)
+	tuple = append(tuple, uint32(0x076ef1ea))
+	tuple = append(tuple, uint8(0))
+	tuple = append(tuple, uint8(0))
+	tuple = append(tuple, uint32(tm.Unix()))
+	tuple = append(tuple, uint8(0))
+	tuple = append(tuple, uint8(0))
+	tuple = append(tuple, new(big.Int).SetBytes(seed))
+	tuple = append(tuple, []any{balance, nil})
+	tuple = append(tuple, cell.BeginCell().MustStoreAddr(addr).ToSlice())
+	tuple = append(tuple, cfg.AsCell())
+	tuple = append(tuple, code)
+	tuple = append(tuple, []any{0, nil}) // storage fees
+	tuple = append(tuple, uint8(0))
+	tuple = append(tuple, nil) // prev blocks
 
-		td::Ref<vm::Tuple> prepare_vm_c7(SmartContract::Args args, td::Ref<vm::Cell> code) {
-		  td::BitArray<256> rand_seed;
-		  if (args.rand_seed) {
-		    rand_seed = args.rand_seed.unwrap();
-		  } else {
-		    rand_seed.as_slice().fill(0);
-		  }
-		  td::RefInt256 rand_seed_int{true};
-		  rand_seed_int.unique_write().import_bits(rand_seed.cbits(), 256, false);
-
-		  td::uint32 now = 0;
-		  if (args.now) {
-		    now = args.now.unwrap();
-		  }
-
-		  vm::CellBuilder cb;
-		  if (args.address) {
-		    td::BigInt256 dest_addr;
-		    dest_addr.import_bits((*args.address).addr.as_bitslice());
-		    cb.store_ones(1).store_zeroes(2).store_long((*args.address).workchain, 8).store_int256(dest_addr, 256);
-		  }
-		  auto address = cb.finalize();
-		  auto config = td::Ref<vm::Cell>();
-
-		  if (args.config) {
-		    config = (*args.config)->get_root_cell();
-		  }
-
-		  std::vector<vm::StackEntry> tuple = {
-		      td::make_refint(0x076ef1ea),                            // [ magic:0x076ef1ea
-		      td::make_refint(0),                                     //   actions:Integer
-		      td::make_refint(0),                                     //   msgs_sent:Integer
-		      td::make_refint(now),                                   //   unixtime:Integer
-		      td::make_refint(0),              //TODO:                //   block_lt:Integer
-		      td::make_refint(0),              //TODO:                //   trans_lt:Integer
-		      std::move(rand_seed_int),                               //   rand_seed:Integer
-		      block::CurrencyCollection(args.balance).as_vm_tuple(),  //   balance_remaining:[Integer (Maybe Cell)]
-		      vm::load_cell_slice_ref(address),                       //  myself:MsgAddressInt
-		      vm::StackEntry::maybe(config)                           //vm::StackEntry::maybe(td::Ref<vm::Cell>())
-		  };
-		  if (args.config && args.config.value()->get_global_version() >= 4) {
-		    tuple.push_back(code.not_null() ? code : vm::StackEntry{});        // code:Cell
-		    tuple.push_back(block::CurrencyCollection::zero().as_vm_tuple());  // in_msg_value:[Integer (Maybe Cell)]
-		    tuple.push_back(td::zero_refint());                                // storage_fees:Integer
-
-		    // See crypto/block/mc-config.cpp#2115 (get_prev_blocks_info)
-		    // [ wc:Integer shard:Integer seqno:Integer root_hash:Integer file_hash:Integer] = BlockId;
-		    // [ last_mc_blocks:[BlockId...]
-		    //   prev_key_block:BlockId ] : PrevBlocksInfo
-		    tuple.push_back(args.prev_blocks_info ? args.prev_blocks_info.value() : vm::StackEntry{});  // prev_block_info
-		  }
-		  auto tuple_ref = td::make_cnt_ref<std::vector<vm::StackEntry>>(std::move(tuple));
-		  //LOG(DEBUG) << "SmartContractInfo initialized with " << vm::StackEntry(tuple).to_string();
-		  return vm::make_tuple_ref(std::move(tuple_ref));
-		}
-	*/
+	stack := tlb.NewStack()
+	stack.Push([]any{tuple})
+	return stack.ToCell()
 }

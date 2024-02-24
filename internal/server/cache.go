@@ -26,10 +26,9 @@ var ErrTimeout = ton.LSError{
 
 type MasterBlock struct {
 	Block
-	Config        *cell.Dictionary
-	StateHash     []byte
-	GenTime       uint32
-	accountsCache *lru.ARCCache
+	StateHash []byte
+	GenTime   uint32
+	Config    *cell.Dictionary
 
 	mx sync.RWMutex
 }
@@ -43,14 +42,16 @@ type Block struct {
 	ID            *ton.BlockIDExt
 	Data          *cell.Cell
 	ShardAccounts *tlb.ShardAccountBlocks
+
+	MasterID *ton.BlockIDExt
+
+	accountsCache *lru.ARCCache
 }
 
 type ShardInfo struct {
 	shardBlocks map[uint32]*ShardBlock
 	lastBlock   *ton.BlockIDExt
 	updatedAt   time.Time
-
-	mx sync.RWMutex
 }
 
 type BlockCache struct {
@@ -291,33 +292,35 @@ func (c *BlockCache) GetMasterBlock(ctx context.Context, id *ton.BlockIDExt) (*M
 		}
 	}
 
-	if c.config.MaxCachedAccountsPerBlock > 0 {
-		// arc cache will still hold frequently used accounts even if there are many new account requests
-		cache, err := lru.NewARC(int(c.config.MaxCachedAccountsPerBlock))
-		if err != nil {
-			return nil, false, err
-		}
-		b.accountsCache = cache
-	}
-
 	var shardAccounts tlb.ShardAccountBlocks
 	if err = tlb.LoadFromCellAsProof(&shardAccounts, block.Extra.ShardAccountBlocks.BeginParse()); err != nil {
 		return nil, false, fmt.Errorf("failed to load shard accounts from block: %w", err)
+	}
+
+	shards, err := ton.LoadShardsFromHashes(block.Extra.Custom.ShardHashes, false)
+	if err != nil {
+		return nil, false, err
+	}
+
+	var cache *lru.ARCCache
+	if c.config.MaxCachedAccountsPerBlock > 0 {
+		// arc cache will still hold frequently used accounts even if there are many new account requests
+		cache, err = lru.NewARC(int(c.config.MaxCachedAccountsPerBlock))
+		if err != nil {
+			return nil, false, err
+		}
 	}
 
 	b.Block = Block{
 		ID:            id,
 		Data:          blockCell,
 		ShardAccounts: &shardAccounts,
+		accountsCache: cache,
+		MasterID:      id,
 	}
-	b.GenTime = block.BlockInfo.GenUtime
 	b.Config = cfg
+	b.GenTime = block.BlockInfo.GenUtime
 	b.StateHash = stateHash
-
-	shards, err := ton.LoadShardsFromHashes(block.Extra.Custom.ShardHashes, false)
-	if err != nil {
-		return nil, false, err
-	}
 
 	c.mx.RLock()
 	lastUpdated := c.lastBlock == nil || b.Block.ID.SeqNo > c.lastBlock.SeqNo
@@ -453,29 +456,42 @@ func getBlockchainConfig(ctx context.Context, client ton.LiteClient, block *ton.
 	return nil, fmt.Errorf("unexpected response from node")
 }
 
-func (c *BlockCache) GetAccountState(ctx context.Context, block *MasterBlock, addr *address.Address) (*ton.AccountState, bool, error) {
-	addrStr := addr.String()
-
-	block.mx.RLock()
-	if block.accountsCache != nil {
-		acc, ok := block.accountsCache.Get(addrStr)
-		if ok {
-			block.mx.RUnlock()
-			return acc.(*ton.AccountState), true, nil
-		}
-	}
-	block.mx.RUnlock()
-
-	account, err := getAccount(ctx, c.balancer.GetClient(), block.Block.ID, addr)
+func (c *BlockCache) GetAccountState(ctx context.Context, id *ton.BlockIDExt, addr *address.Address) (*ton.AccountState, bool, error) {
+	block, blockFromCache, err := c.CacheBlockIfNeeded(ctx, id)
 	if err != nil {
 		return nil, false, err
 	}
 
-	block.mx.RLock()
-	if block.accountsCache != nil {
+	acc, cached, err := c.GetAccountStateInBlock(ctx, block, addr)
+	if err != nil {
+		return nil, false, err
+	}
+
+	if cached {
+		cached = blockFromCache
+	}
+
+	return acc, cached, err
+}
+
+func (c *BlockCache) GetAccountStateInBlock(ctx context.Context, block *Block, addr *address.Address) (*ton.AccountState, bool, error) {
+	addrStr := addr.String()
+
+	if block != nil && block.accountsCache != nil {
+		acc, ok := block.accountsCache.Get(addrStr)
+		if ok {
+			return acc.(*ton.AccountState), true, nil
+		}
+	}
+
+	account, err := getAccount(ctx, c.balancer.GetClient(), block.ID, addr)
+	if err != nil {
+		return nil, false, err
+	}
+
+	if block != nil && block.accountsCache != nil {
 		block.accountsCache.Add(addrStr, account)
 	}
-	block.mx.RUnlock()
 
 	return account, false, nil
 }
@@ -530,7 +546,7 @@ func (c *BlockCache) LookupBlockInCache(id *ton.BlockInfoShort) (*ton.BlockHeade
 	return nil, nil
 }
 
-func (c *BlockCache) cacheBlockIfNeeded(ctx context.Context, id *ton.BlockIDExt) (*Block, bool, error) {
+func (c *BlockCache) CacheBlockIfNeeded(ctx context.Context, id *ton.BlockIDExt) (*Block, bool, error) {
 	var fromCache bool
 	var data *Block
 	if id.Workchain != -1 {
@@ -592,6 +608,23 @@ func (c *BlockCache) cacheBlockIfNeeded(ctx context.Context, id *ton.BlockIDExt)
 				if err = tlb.LoadFromCellAsProof(&shardAccounts, block.Extra.ShardAccountBlocks.BeginParse()); err != nil {
 					return nil, false, fmt.Errorf("failed to load shard accounts from block: %w", err)
 				}
+
+				if c.config.MaxCachedAccountsPerBlock > 0 {
+					// arc cache will still hold frequently used accounts even if there are many new account requests
+					cache, err := lru.NewARC(int(c.config.MaxCachedAccountsPerBlock))
+					if err != nil {
+						return nil, false, err
+					}
+					b.accountsCache = cache
+				}
+
+				b.MasterID = &ton.BlockIDExt{
+					Workchain: -1,
+					Shard:     -0x8000000000000000,
+					SeqNo:     block.BlockInfo.MasterRef.SeqNo,
+					RootHash:  block.BlockInfo.MasterRef.RootHash,
+					FileHash:  block.BlockInfo.MasterRef.FileHash,
+				}
 				b.Data = blk
 				b.ShardAccounts = &shardAccounts
 			} else {
@@ -629,7 +662,7 @@ func (c *BlockCache) cacheBlockIfNeeded(ctx context.Context, id *ton.BlockIDExt)
 }
 
 func (c *BlockCache) GetBlock(ctx context.Context, id *ton.BlockIDExt) (*ton.BlockData, bool, error) {
-	block, cached, err := c.cacheBlockIfNeeded(ctx, id)
+	block, cached, err := c.CacheBlockIfNeeded(ctx, id)
 	if err != nil {
 		return nil, false, err
 	}
@@ -654,7 +687,7 @@ func (c *BlockCache) GetBlock(ctx context.Context, id *ton.BlockIDExt) (*ton.Blo
 }
 
 func (c *BlockCache) GetTransaction(ctx context.Context, id *ton.BlockIDExt, account *ton.AccountID, lt int64) (*ton.TransactionInfo, bool, error) {
-	block, cached, err := c.cacheBlockIfNeeded(ctx, id)
+	block, cached, err := c.CacheBlockIfNeeded(ctx, id)
 	if err != nil {
 		return nil, false, err
 	}
@@ -746,7 +779,7 @@ func getAccount(ctx context.Context, client ton.LiteClient, block *ton.BlockIDEx
 	switch t := resp.(type) {
 	case ton.AccountState:
 		if !t.ID.Equals(block) {
-			return nil, fmt.Errorf("response with incorrect master block")
+			return nil, fmt.Errorf("response with incorrect block")
 		}
 		return &t, nil
 	case ton.LSError:
