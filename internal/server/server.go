@@ -519,7 +519,7 @@ func (s *ProxyBalancer) handleRunSmcMethod(ctx context.Context, v *ton.RunSmcMet
 	}
 	log.Debug().Dur("took", time.Since(etm)).Msg("get method emulation finished")
 
-	var stateProof *cell.Cell
+	var stateProof, c7 *cell.Cell
 
 	if v.Mode&2 != 0 {
 		stateProof, err = state.State.CreateProof(cell.CreateProofSkeleton())
@@ -529,6 +529,17 @@ func (s *ProxyBalancer) handleRunSmcMethod(ctx context.Context, v *ton.RunSmcMet
 			return ton.LSError{
 				Code: 500,
 				Text: "failed to prepare state proof args: " + err.Error(),
+			}, HitTypeFailedInternal
+		}
+	}
+
+	if v.Mode&8 != 0 {
+		// short c7 for response
+		c7, err = emulate.PrepareC7(addr, time.Now(), seed, st.Balance.Nano(), nil, nil)
+		if err != nil {
+			return ton.LSError{
+				Code: 500,
+				Text: "failed to prepare c7: " + err.Error(),
 			}, HitTypeFailedInternal
 		}
 	}
@@ -548,7 +559,7 @@ func (s *ProxyBalancer) handleRunSmcMethod(ctx context.Context, v *ton.RunSmcMet
 		ShardProof: state.ShardProof,
 		Proof:      state.Proof,
 		StateProof: stateProof,
-		InitC7:     c7cell,
+		InitC7:     c7,
 		LibExtras:  nil,
 		ExitCode:   res.ExitCode,
 		Result:     res.Stack,

@@ -89,11 +89,15 @@ func PrepareC7(addr *address.Address, tm time.Time, seed []byte, balance *big.In
 	tuple = append(tuple, new(big.Int).SetBytes(seed))
 	tuple = append(tuple, []any{balance, nil})
 	tuple = append(tuple, cell.BeginCell().MustStoreAddr(addr).ToSlice())
-	tuple = append(tuple, cfg.AsCell())
-	tuple = append(tuple, code)
-	tuple = append(tuple, []any{0, nil}) // storage fees
-	tuple = append(tuple, uint8(0))
-	tuple = append(tuple, nil) // prev blocks
+	if cfg != nil {
+		tuple = append(tuple, cfg.AsCell())
+		tuple = append(tuple, code)
+		tuple = append(tuple, []any{0, nil}) // storage fees
+		tuple = append(tuple, uint8(0))
+		tuple = append(tuple, nil) // prev blocks
+	} else {
+		tuple = append(tuple, nil)
+	}
 
 	stack := tlb.NewStack()
 	stack.Push([]any{tuple})
