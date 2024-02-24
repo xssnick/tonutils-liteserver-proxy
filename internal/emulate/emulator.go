@@ -74,7 +74,7 @@ func RunGetMethod(params RunMethodParams, maxGas int64) (*RunResult, error) {
 	return &result, nil
 }
 
-func PrepareC7(addr *address.Address, tm time.Time, seed []byte, balance *big.Int, cfg *cell.Dictionary, code *cell.Cell) (*cell.Cell, error) {
+func PrepareC7(addr *address.Address, tm time.Time, seed []byte, balance *big.Int, cfg *cell.Dictionary, code *cell.Cell) ([]any, error) {
 	if len(seed) != 32 {
 		return nil, fmt.Errorf("seed len is not 32")
 	}
@@ -99,7 +99,5 @@ func PrepareC7(addr *address.Address, tm time.Time, seed []byte, balance *big.In
 		tuple = append(tuple, nil)
 	}
 
-	stack := tlb.NewStack()
-	stack.Push([]any{tuple})
-	return stack.ToCell()
+	return []any{tuple}, nil
 }

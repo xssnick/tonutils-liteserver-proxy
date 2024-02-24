@@ -490,11 +490,21 @@ func (s *ProxyBalancer) handleRunSmcMethod(ctx context.Context, v *ton.RunSmcMet
 		libsCell = cell.BeginCell().EndCell()
 	}
 
-	c7cell, err := emulate.PrepareC7(addr, time.Now(), seed, st.Balance.Nano(), masterBlock.Config, st.StateInit.Code)
+	c7tuple, err := emulate.PrepareC7(addr, time.Now(), seed, st.Balance.Nano(), masterBlock.Config, st.StateInit.Code)
 	if err != nil {
 		return ton.LSError{
 			Code: 500,
 			Text: "failed to prepare c7: " + err.Error(),
+		}, HitTypeFailedInternal
+	}
+
+	stack := tlb.NewStack()
+	stack.Push(c7tuple)
+	c7cell, err := stack.ToCell()
+	if err != nil {
+		return ton.LSError{
+			Code: 500,
+			Text: "failed to build c7 stack: " + err.Error(),
 		}, HitTypeFailedInternal
 	}
 
@@ -535,13 +545,22 @@ func (s *ProxyBalancer) handleRunSmcMethod(ctx context.Context, v *ton.RunSmcMet
 
 	if v.Mode&8 != 0 {
 		// short c7 for response
-		c7, err = emulate.PrepareC7(addr, time.Now(), seed, st.Balance.Nano(), nil, nil)
+		c7t, err := emulate.PrepareC7(addr, time.Now(), seed, st.Balance.Nano(), nil, nil)
 		if err != nil {
 			return ton.LSError{
 				Code: 500,
 				Text: "failed to prepare c7: " + err.Error(),
 			}, HitTypeFailedInternal
 		}
+
+		b := cell.BeginCell()
+		if err = tlb.SerializeStackValue(b, c7t); err != nil {
+			return ton.LSError{
+				Code: 500,
+				Text: "failed to build c7 tuple: " + err.Error(),
+			}, HitTypeFailedInternal
+		}
+		c7 = b.EndCell()
 	}
 
 	hit := HitTypeBackend
