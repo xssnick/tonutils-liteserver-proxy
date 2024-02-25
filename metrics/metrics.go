@@ -11,6 +11,7 @@ type Metrics struct {
 	LSErrors              *prometheus.CounterVec
 	Queries               *prometheus.HistogramVec
 	BackendQueries        *prometheus.HistogramVec
+	RunGetMethodEmulation prometheus.Histogram
 }
 
 var Global *Metrics
@@ -47,5 +48,11 @@ func InitMetrics(namespace, subsystem string) {
 			Name:      "backend_queries",
 			Help:      "LS Requests to backend statistics",
 		}, []string{"name", "request_type", "status"}),
+		RunGetMethodEmulation: promauto.NewHistogram(prometheus.HistogramOpts{
+			Namespace: namespace,
+			Subsystem: subsystem,
+			Name:      "run_get_method",
+			Help:      "Run Get Method emulation",
+		}),
 	}
 }

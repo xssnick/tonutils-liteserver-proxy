@@ -527,7 +527,9 @@ func (s *ProxyBalancer) handleRunSmcMethod(ctx context.Context, v *ton.RunSmcMet
 			Text: "failed to emulate run method: " + err.Error(),
 		}, HitTypeFailedInternal
 	}
-	log.Debug().Dur("took", time.Since(etm)).Msg("get method emulation finished")
+	took := time.Since(etm)
+	metrics.Global.RunGetMethodEmulation.Observe(took.Seconds())
+	log.Debug().Dur("took", took).Msg("get method emulation finished")
 
 	var stateProof, c7 *cell.Cell
 
