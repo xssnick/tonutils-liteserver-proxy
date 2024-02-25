@@ -30,6 +30,7 @@ const HitTypeEmulated = "emulated"
 const HitTypeBackend = "backend"
 const HitTypeCache = "cache"
 const HitTypeGPCache = "gp_cache"
+const HitTypeInflightCache = "inflight_cache"
 const HitTypeFailedValidate = "failed_validate"
 const HitTypeFailedInternal = "failed_internal"
 
@@ -60,6 +61,11 @@ type ClientIPInfo struct {
 	ActiveConnections map[uint16]*ClientConnInfo
 }
 
+type CacheWaiter struct {
+	W      chan bool
+	Result tl.Serializable
+}
+
 type ProxyBalancer struct {
 	srv             *liteclient.Server
 	backendBalancer *BackendBalancer
@@ -73,6 +79,9 @@ type ProxyBalancer struct {
 	maxKeepAlive        time.Duration
 
 	gpCache *lru.ARCCache
+
+	inflightCache map[uint64]*CacheWaiter
+	iflCacheMx    sync.RWMutex
 
 	mx sync.RWMutex
 }
@@ -92,6 +101,7 @@ func NewProxyBalancer(configs []config.ClientConfig, backendBalancer *BackendBal
 		maxConnectionsPerIP: maxConnectionsPerIP,
 		maxKeepAlive:        maxKeepAlive,
 		ips:                 map[string]*ClientIPInfo{},
+		inflightCache:       map[uint64]*CacheWaiter{},
 	}
 
 	if gpCacheSize > 0 {
@@ -220,7 +230,8 @@ func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.Server
 		case liteclient.LiteServerQuery:
 			cost := int64(1) // TODO: dynamic cost (depending on query)
 
-			if (lim.limiterPerIP != nil && lim.limiterPerIP.Add(sc.IP(), cost) != cost) || (lim.limiterPerKey != nil && lim.limiterPerKey.Add(cost) != cost) {
+			if (lim.limiterPerIP != nil && lim.limiterPerIP.Add(sc.IP(), cost) != cost) ||
+				(lim.limiterPerKey != nil && lim.limiterPerKey.Add(cost) != cost) {
 				limited = true
 				return sc.Send(adnl.MessageAnswer{ID: m.ID, Data: ton.LSError{
 					Code: 429,
@@ -341,12 +352,48 @@ func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.Server
 					}
 					gpKey = crc64.Checksum(rqData, crcTable)
 
-					// TODO: wait same parallel requests
+					lead := false
+					s.iflCacheMx.Lock()
+					wt := s.inflightCache[gpKey]
+					if wt == nil {
+						wt = &CacheWaiter{
+							W:      make(chan bool),
+							Result: nil,
+						}
+						s.inflightCache[gpKey] = wt
+						lead = true
+					}
+					s.iflCacheMx.Unlock()
 
-					resp, _ = s.gpCache.Get(gpKey)
-					if resp != nil {
-						log.Debug().Type("request", q.Data).Type("response", resp).Msg("fetched from gp cache")
-						hitType = HitTypeGPCache
+					if lead {
+						defer func() {
+							wt.Result = resp
+							close(wt.W)
+
+							s.iflCacheMx.Lock()
+							delete(s.inflightCache, gpKey)
+							s.iflCacheMx.Unlock()
+						}()
+					} else {
+						select {
+						case <-ctx.Done():
+							resp = ton.LSError{
+								Code: 400,
+								Text: "canceled",
+							}
+						case <-wt.W:
+							resp = wt.Result
+							hitType = HitTypeInflightCache
+							log.Debug().Type("request", q.Data).Int("cache_sz", len(s.inflightCache)).Msg("result from inflight cache")
+						}
+					}
+
+					if resp == nil {
+						resp, _ = s.gpCache.Get(gpKey)
+						if resp != nil {
+							log.Debug().Type("request", q.Data).Type("response", resp).Msg("fetched from gp cache")
+							hitType = HitTypeGPCache
+						}
 					}
 				}
 
@@ -380,7 +427,7 @@ func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.Server
 							}
 						}
 					} else if s.gpCache != nil {
-						if _, ok := err.(ton.LSError); !ok {
+						if _, ok := resp.(ton.LSError); !ok {
 							// do not cache errors
 							s.gpCache.Add(gpKey, resp)
 						}

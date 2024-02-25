@@ -17,7 +17,8 @@ import (
 )
 
 var (
-	Verbosity = flag.Int("verbosity", 2, "3 = debug, 2 = info, 1 = warn, 0 = error")
+	Verbosity  = flag.Int("verbosity", 2, "3 = debug, 2 = info, 1 = warn, 0 = error")
+	ConfigPath = flag.String("config", "ls-proxy-config.json", "json config path")
 )
 
 func main() {
@@ -37,7 +38,7 @@ func main() {
 		log.Logger = log.Logger.Level(zerolog.ErrorLevel).With().Logger()
 	}
 
-	cfg, err := config.LoadConfig("ls-proxy-config.json")
+	cfg, err := config.LoadConfig(*ConfigPath)
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to load config")
 		return
