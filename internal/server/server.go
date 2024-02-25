@@ -316,7 +316,7 @@ func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.Server
 
 					snc := time.Since(tm)
 					metrics.Global.Queries.WithLabelValues(lim.name, reflect.TypeOf(q.Data).String(), hitType).Observe(snc.Seconds())
-					log.Debug().Type("request", q.Data).Dur("took", snc).Msg("query finished")
+					log.Debug().Str("ip", sc.IP()).Type("request", q.Data).Dur("took", snc).Msg("query finished")
 				}()
 
 				var gpKey uint64
@@ -331,6 +331,8 @@ func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.Server
 						}
 					}
 					gpKey = crc64.Checksum(rqData, crcTable)
+
+					// TODO: wait same parallel requests
 
 					resp, _ = s.gpCache.Get(gpKey)
 					if resp != nil {
@@ -381,11 +383,6 @@ func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.Server
 }
 
 func (s *ProxyBalancer) handleRunSmcMethod(ctx context.Context, v *ton.RunSmcMethod) (tl.Serializable, string) {
-	if v.ID.Workchain != -1 {
-		// TODO: account state on shard block level
-		return nil, HitTypeBackend
-	}
-
 	block, cachedBlock, err := s.cache.CacheBlockIfNeeded(ctx, v.ID)
 	if err != nil {
 		if ls, ok := err.(ton.LSError); ok {
@@ -402,6 +399,12 @@ func (s *ProxyBalancer) handleRunSmcMethod(ctx context.Context, v *ton.RunSmcMet
 		}, HitTypeFailedInternal
 	}
 
+	if block == nil {
+		// block is too old for cache, for now we proxy it to backend,
+		// but maybe it is reasonable to throw an error
+		return nil, HitTypeBackend
+	}
+
 	masterBlock, cachedMasterBlock, err := s.cache.GetMasterBlock(ctx, block.MasterID)
 	if err != nil {
 		if ls, ok := err.(ton.LSError); ok {
@@ -416,12 +419,6 @@ func (s *ProxyBalancer) handleRunSmcMethod(ctx context.Context, v *ton.RunSmcMet
 			Code: 500,
 			Text: "failed to resolve master block",
 		}, HitTypeFailedInternal
-	}
-
-	if block == nil {
-		// block is too old for cache, for now we proxy it to backend,
-		// but maybe it is reasonable to throw an error
-		return nil, HitTypeBackend
 	}
 
 	addr := address.NewAddress(0, byte(v.Account.Workchain), v.Account.ID)
