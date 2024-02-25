@@ -400,6 +400,8 @@ func (s *ProxyBalancer) handleRunSmcMethod(ctx context.Context, v *ton.RunSmcMet
 	}
 
 	if block == nil {
+		log.Debug().Int32("wc", v.ID.Workchain).Uint32("seqno", v.ID.SeqNo).Msg("direct run method, block is not for caching")
+
 		// block is too old for cache, for now we proxy it to backend,
 		// but maybe it is reasonable to throw an error
 		return nil, HitTypeBackend

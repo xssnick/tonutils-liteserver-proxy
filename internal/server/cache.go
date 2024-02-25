@@ -576,8 +576,8 @@ func (c *BlockCache) CacheBlockIfNeeded(ctx context.Context, id *ton.BlockIDExt)
 			if dataFetched {
 				if !b.ID.Equals(id) {
 					return nil, false, ton.LSError{
-						Code: 403,
-						Text: "incorrect block id",
+						Code: 651,
+						Text: "unknown block id",
 					}
 				}
 				data = &b.Block
@@ -649,8 +649,8 @@ func (c *BlockCache) CacheBlockIfNeeded(ctx context.Context, id *ton.BlockIDExt)
 		if b != nil && b.Block.ID != nil {
 			if !b.Block.ID.Equals(id) {
 				return nil, false, ton.LSError{
-					Code: 403,
-					Text: "incorrect block id",
+					Code: 651,
+					Text: "unknown block id",
 				}
 			}
 			data = &b.Block
