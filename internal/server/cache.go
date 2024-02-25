@@ -64,7 +64,7 @@ type BlockCache struct {
 	zeroState *ton.ZeroStateIDExt
 
 	masterBlocks map[uint32]*MasterBlock
-	shardBlocks  map[string]*ShardInfo
+	shards       map[string]*ShardInfo
 
 	mcWaiter unsafe.Pointer
 	mx       sync.RWMutex
@@ -75,7 +75,7 @@ func NewBlockCache(config config.CacheConfig, balancer *BackendBalancer) *BlockC
 		config:       config,
 		balancer:     balancer,
 		masterBlocks: map[uint32]*MasterBlock{},
-		shardBlocks:  map[string]*ShardInfo{},
+		shards:       map[string]*ShardInfo{},
 	}
 
 	if config.MaxCachedLibraries > 0 {
@@ -333,12 +333,12 @@ func (c *BlockCache) GetMasterBlock(ctx context.Context, id *ton.BlockIDExt) (*M
 
 			for _, shard := range shards {
 				shardKey := getShardKey(shard.Workchain, shard.Shard)
-				si := c.shardBlocks[shardKey]
+				si := c.shards[shardKey]
 				if si == nil {
 					si = &ShardInfo{
 						shardBlocks: map[uint32]*ShardBlock{},
 					}
-					c.shardBlocks[shardKey] = si
+					c.shards[shardKey] = si
 				}
 				si.lastBlock = shard
 				si.updatedAt = time.Now()
@@ -358,10 +358,10 @@ func (c *BlockCache) GetMasterBlock(ctx context.Context, id *ton.BlockIDExt) (*M
 				}
 			}
 			// remove old merged shards
-			staleBefore := time.Now().Add(-15 * time.Minute)
-			for k, sx := range c.shardBlocks {
+			staleBefore := time.Now().Add(-30 * time.Minute)
+			for k, sx := range c.shards {
 				if sx.updatedAt.Before(staleBefore) {
-					delete(c.shardBlocks, k)
+					delete(c.shards, k)
 				}
 			}
 		}
@@ -521,7 +521,7 @@ func (c *BlockCache) LookupBlockInCache(id *ton.BlockInfoShort) (*ton.BlockHeade
 	} else {
 		var b *ShardBlock
 		c.mx.RLock()
-		si := c.shardBlocks[getShardKey(id.Workchain, id.Shard)]
+		si := c.shards[getShardKey(id.Workchain, id.Shard)]
 		if si != nil {
 			b = si.shardBlocks[uint32(id.Seqno)]
 		}
@@ -561,12 +561,16 @@ func (c *BlockCache) CacheBlockIfNeeded(ctx context.Context, id *ton.BlockIDExt)
 		shardKey := getShardKey(id.Workchain, id.Shard)
 		var b *ShardBlock
 		c.mx.RLock()
-		si := c.shardBlocks[shardKey]
+		si := c.shards[shardKey]
 		if si != nil {
 			b = si.shardBlocks[id.SeqNo]
 		}
 		needCache := si != nil && id.SeqNo >= si.lastBlock.SeqNo-c.config.MaxShardBlockSeqnoDiffToCache
 		c.mx.RUnlock()
+
+		if si == nil {
+			log.Debug().Str("key", shardKey).Msg("no shard info in cache")
+		}
 
 		if b != nil {
 			b.mx.RLock()
