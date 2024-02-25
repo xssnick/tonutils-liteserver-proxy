@@ -294,8 +294,6 @@ func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.Server
 						resp, hitType = s.handleGetBlock(ctx, &v)
 					case ton.GetAccountState:
 						resp, hitType = s.handleGetAccount(ctx, &v)
-					case ton.RunSmcMethod:
-						resp, hitType = s.handleRunSmcMethod(ctx, &v)
 					case ton.LookupBlock:
 						resp, hitType = s.handleLookupBlock(ctx, &v)
 					case ton.GetBlockHeader:
@@ -305,7 +303,18 @@ func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.Server
 					case ton.GetAllShardsInfo:
 					case ton.ListBlockTransactions:
 					case ton.ListBlockTransactionsExt:
-						// TODO: cache all of this
+					case ton.RunSmcMethod:
+					case ton.GetState:
+					case ton.GetAccountStatePruned:
+					case ton.GetShardInfo:
+					case ton.GetTransactions:
+					case ton.GetShardBlockProof:
+					case ton.SendMessage:
+					default:
+						resp = ton.LSError{
+							Code: -400,
+							Text: "unknown request type",
+						}
 					}
 				}
 
@@ -316,7 +325,7 @@ func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.Server
 
 					snc := time.Since(tm)
 					metrics.Global.Queries.WithLabelValues(lim.name, reflect.TypeOf(q.Data).String(), hitType).Observe(snc.Seconds())
-					log.Debug().Str("ip", sc.IP()).Type("request", q.Data).Dur("took", snc).Msg("query finished")
+					log.Debug().Str("ip", sc.IP()).Type("request", q.Data).Type("response", resp).Dur("took", snc).Msg("query finished")
 				}()
 
 				var gpKey uint64
@@ -341,6 +350,13 @@ func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.Server
 					}
 				}
 
+				if !s.onlyProxy && resp == nil {
+					// we have it here to cache calls, because they are heavy
+					if v, ok := q.Data.(ton.RunSmcMethod); ok {
+						resp, hitType = s.handleRunSmcMethod(ctx, &v)
+					}
+				}
+
 				if resp == nil {
 					log.Debug().Type("request", q.Data).Msg("direct proxy")
 					// we expect to have only fast nodes, so timeout is short
@@ -350,9 +366,7 @@ func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.Server
 					err := s.backendBalancer.GetClient().QueryLiteserver(ctx, q.Data, &resp)
 					cancel()
 					if err != nil {
-						if ls, ok := err.(ton.LSError); ok {
-							resp = ls
-						} else if strings.HasSuffix(err.Error(), "context canceled") {
+						if strings.HasSuffix(err.Error(), "context canceled") {
 							resp = ton.LSError{
 								Code: 400,
 								Text: "canceled",
@@ -366,7 +380,10 @@ func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.Server
 							}
 						}
 					} else if s.gpCache != nil {
-						s.gpCache.Add(gpKey, resp)
+						if _, ok := err.(ton.LSError); !ok {
+							// do not cache errors
+							s.gpCache.Add(gpKey, resp)
+						}
 					}
 				}
 
@@ -790,7 +807,7 @@ func (s *ProxyBalancer) handleGetAccount(ctx context.Context, v *ton.GetAccountS
 
 func (s *ProxyBalancer) handleLookupBlock(ctx context.Context, v *ton.LookupBlock) (tl.Serializable, string) {
 	if v.Mode != 1 {
-		log.Debug().Msg("requested lookup block with non 1 mode")
+		log.Debug().Uint32("mode", v.Mode).Msg("requested lookup block with non 1 mode")
 		// TODO: support non zero mode too
 		return nil, HitTypeBackend
 	}

@@ -521,12 +521,17 @@ func (c *BlockCache) LookupBlockInCache(id *ton.BlockInfoShort) (*ton.BlockHeade
 		}
 	} else {
 		var b *ShardBlock
+		shardKey := getShardKey(id.Workchain, id.Shard)
 		c.mx.RLock()
-		si := c.shards[getShardKey(id.Workchain, id.Shard)]
+		si := c.shards[shardKey]
 		if si != nil {
 			b = si.shardBlocks[uint32(id.Seqno)]
 		}
 		c.mx.RUnlock()
+
+		if si == nil {
+			log.Debug().Str("key", shardKey).Msg("no shard info in cache")
+		}
 
 		if b != nil {
 			b.mx.RLock()
