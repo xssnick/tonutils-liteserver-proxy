@@ -339,6 +339,7 @@ func (c *BlockCache) GetMasterBlock(ctx context.Context, id *ton.BlockIDExt) (*M
 						shardBlocks: map[uint32]*ShardBlock{},
 					}
 					c.shards[shardKey] = si
+					log.Debug().Str("key", shardKey).Int("shards", len(c.shards)).Msg("creating shard info")
 				}
 				si.lastBlock = shard
 				si.updatedAt = time.Now()
