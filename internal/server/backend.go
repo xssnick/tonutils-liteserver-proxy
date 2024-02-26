@@ -11,6 +11,7 @@ import (
 	"github.com/xssnick/tonutils-liteserver-proxy/config"
 	"github.com/xssnick/tonutils-liteserver-proxy/metrics"
 	"reflect"
+	"strings"
 	"sync/atomic"
 	"time"
 )
@@ -96,6 +97,10 @@ func (b *Backend) QueryLiteserver(ctx context.Context, payload tl.Serializable, 
 		atomic.StoreInt64(&b.lastRequest, time.Now().Unix())
 		status := "ok"
 		if err != nil {
+			if strings.HasSuffix(err.Error(), "context canceled") {
+				// we don't consider canceled context as an error
+				return
+			}
 			atomic.AddUint64(&b.failsStreak, 1)
 			status = "failed"
 			log.Debug().Err(err).Str("name", b.Name).Msg("backend query failed")
