@@ -324,7 +324,7 @@ func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.Server
 					default:
 						log.Debug().Str("ip", sc.IP()).Type("request", q.Data).Msg("unknown request type")
 
-						q.Data = nil // overwrite to not make metrics dirty
+						q.Data = ton.Object{} // overwrite to not make metrics dirty
 						hitType = HitTypeFailedValidate
 						resp = ton.LSError{
 							Code: -400,
@@ -858,7 +858,8 @@ func (s *ProxyBalancer) handleGetAccount(ctx context.Context, v *ton.GetAccountS
 
 func (s *ProxyBalancer) handleLookupBlock(ctx context.Context, v *ton.LookupBlock) (tl.Serializable, string) {
 	if v.Mode != 1 {
-		log.Debug().Uint32("mode", v.Mode).Msg("requested lookup block with non 1 mode")
+		log.Debug().Int32("seqno", v.ID.Seqno).Int64("shard", v.ID.Shard).
+			Int32("wc", v.ID.Workchain).Uint32("mode", v.Mode).Msg("requested lookup block with non 1 mode")
 		// TODO: support non zero mode too
 		return nil, HitTypeBackend
 	}
@@ -875,7 +876,8 @@ func (s *ProxyBalancer) handleLookupBlock(ctx context.Context, v *ton.LookupBloc
 
 	if hdr == nil {
 		// not in cache
-		log.Debug().Msg("lookup block cache miss")
+		log.Debug().Int32("seqno", v.ID.Seqno).Int64("shard", v.ID.Shard).
+			Int32("wc", v.ID.Workchain).Uint32("mode", v.Mode).Msg("lookup block cache miss")
 		return nil, HitTypeBackend
 	}
 	return hdr, HitTypeCache
