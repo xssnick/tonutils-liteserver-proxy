@@ -322,6 +322,10 @@ func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.Server
 					case ton.GetShardBlockProof:
 					case ton.SendMessage:
 					default:
+						log.Debug().Str("ip", sc.IP()).Type("request", q.Data).Msg("unknown request type")
+
+						q.Data = nil // overwrite to not make metrics dirty
+						hitType = HitTypeFailedValidate
 						resp = ton.LSError{
 							Code: -400,
 							Text: "unknown request type",

@@ -3,7 +3,6 @@ package server
 import (
 	"bytes"
 	"context"
-	"encoding/hex"
 	"fmt"
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/rs/zerolog/log"
@@ -22,6 +21,12 @@ import (
 var ErrTimeout = ton.LSError{
 	Code: 652,
 	Text: "timeout",
+}
+
+type KeyBlock struct {
+	Seqno uint32
+	Proof *cell.Cell
+	Prev  *KeyBlock
 }
 
 type MasterBlock struct {
@@ -62,6 +67,8 @@ type BlockCache struct {
 
 	lastBlock *ton.BlockIDExt
 	zeroState *ton.ZeroStateIDExt
+
+	keyBlocksProofs map[uint32]*KeyBlock
 
 	masterBlocks map[uint32]*MasterBlock
 	shards       map[string]*ShardInfo
@@ -174,19 +181,12 @@ func (c *BlockCache) GetLibraries(ctx context.Context, hashes [][]byte) (*cell.D
 		return nil, false, err
 	}
 
-	var notFound []byte
 	for i, cl := range fetchedLibs {
 		if cl != nil {
 			c.libsCache.Add(string(toFetch[i]), cl)
-		} else {
-			notFound = toFetch[i]
-		}
-	}
-
-	if notFound != nil {
-		return nil, false, ton.LSError{
-			Code: 404,
-			Text: "library is not found: " + hex.EncodeToString(notFound),
+			if err = libs.Set(cell.BeginCell().MustStoreSlice(cl.Hash(), 256).EndCell(), cl); err != nil {
+				return nil, false, err
+			}
 		}
 	}
 
@@ -208,7 +208,7 @@ func (c *BlockCache) GetMasterBlock(ctx context.Context, id *ton.BlockIDExt) (*M
 
 	if lastSeqno > 0 && id.SeqNo < lastSeqno-c.config.MaxMasterBlockSeqnoDiffToCache {
 		return nil, false, ton.LSError{
-			Code: 404,
+			Code: 410,
 			Text: "too old master info requested",
 		}
 	}
@@ -237,8 +237,8 @@ func (c *BlockCache) GetMasterBlock(ctx context.Context, id *ton.BlockIDExt) (*M
 	if b.Block.ID != nil {
 		if !b.Block.ID.Equals(id) {
 			return nil, false, ton.LSError{
-				Code: 400,
-				Text: "incorrect block id",
+				Code: 651,
+				Text: "unknown block id",
 			}
 		}
 		return b, true, nil
@@ -833,7 +833,7 @@ func getMasterchainInfo(ctx context.Context, client ton.LiteClient, seqno uint32
 	if seqno > 0 {
 		prefix, err = tl.Serialize(ton.WaitMasterchainSeqno{
 			Seqno:   int32(seqno),
-			Timeout: int32(8000),
+			Timeout: int32(6500),
 		}, true)
 		if err != nil {
 			return nil, err
