@@ -98,9 +98,11 @@ func (b *Backend) QueryLiteserver(ctx context.Context, payload tl.Serializable, 
 		if err != nil {
 			atomic.AddUint64(&b.failsStreak, 1)
 			status = "failed"
-		} else if _, ok := result.(ton.LSError); ok {
+			log.Debug().Err(err).Str("name", b.Name).Msg("backend query failed")
+		} else if ls, ok := result.(ton.LSError); ok {
 			atomic.AddUint64(&b.failsStreak, 1)
 			status = "ls_error"
+			log.Debug().Str("name", b.Name).Str("reason", ls.Text).Int32("code", ls.Code).Msg("backend query ls error")
 		} else {
 			atomic.StoreUint64(&b.failsStreak, 0)
 			atomic.StoreInt64(&b.lastSuccess, atomic.LoadInt64(&b.lastRequest))

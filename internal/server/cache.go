@@ -215,7 +215,7 @@ func (c *BlockCache) GetMasterBlock(ctx context.Context, id *ton.BlockIDExt) (*M
 
 	if lastSeqno > 0 && id.SeqNo > lastSeqno+200 {
 		return nil, false, ton.LSError{
-			Code: 404,
+			Code: 411,
 			Text: "too future block",
 		}
 	}
@@ -724,10 +724,11 @@ func (c *BlockCache) GetTransaction(ctx context.Context, id *ton.BlockIDExt, acc
 	accKey := cell.BeginCell().MustStoreSlice(account.ID, 256).EndCell()
 	acc, accProofPath, err := block.ShardAccounts.Accounts.LoadValueWithProof(accKey, pathToDict)
 	if err != nil {
-		return nil, false, ton.LSError{
-			Code: 404,
-			Text: "account is not found in a given block",
-		}
+		return &ton.TransactionInfo{
+			ID:          id,
+			Proof:       nil,
+			Transaction: nil,
+		}, cached, nil
 	}
 
 	if err = tlb.LoadFromCell(new(tlb.CurrencyCollection), acc); err != nil {
@@ -750,10 +751,11 @@ func (c *BlockCache) GetTransaction(ctx context.Context, id *ton.BlockIDExt, acc
 	key := cell.BeginCell().MustStoreInt(lt, 64).EndCell()
 	accTx, _, err := accBlock.Transactions.LoadValueWithProof(key, accProofPath)
 	if err != nil {
-		return nil, false, ton.LSError{
-			Code: 404,
-			Text: "no transaction with a given lt on account",
-		}
+		return &ton.TransactionInfo{
+			ID:          id,
+			Proof:       nil,
+			Transaction: nil,
+		}, cached, nil
 	}
 
 	proof, err := block.Data.CreateProof(sk)
