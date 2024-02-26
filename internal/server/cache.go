@@ -653,7 +653,7 @@ func (c *BlockCache) CacheBlockIfNeeded(ctx context.Context, id *ton.BlockIDExt)
 	} else {
 		c.mx.RLock()
 		b := c.masterBlocks[id.SeqNo]
-		needCache := c.lastBlock != nil && id.SeqNo < c.lastBlock.SeqNo-c.config.MaxMasterBlockSeqnoDiffToCache
+		needCache := c.lastBlock != nil && id.SeqNo >= c.lastBlock.SeqNo-c.config.MaxMasterBlockSeqnoDiffToCache
 		c.mx.RUnlock()
 
 		if b != nil && b.Block.ID != nil {
