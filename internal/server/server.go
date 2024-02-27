@@ -36,14 +36,12 @@ const HitTypeFailedInternal = "failed_internal"
 
 type Cache interface {
 	LookupBlockInCache(id *ton.BlockInfoShort) (*ton.BlockHeader, error)
-	GetTransaction(ctx context.Context, id *ton.BlockIDExt, account *ton.AccountID, lt int64) (*ton.TransactionInfo, bool, error)
+	GetTransaction(ctx context.Context, block *Block, account *ton.AccountID, lt int64) (*ton.TransactionInfo, error)
 	GetLibraries(ctx context.Context, hashes [][]byte) (*cell.Dictionary, bool, error)
 	WaitMasterBlock(ctx context.Context, seqno uint32, timeout time.Duration) error
 	GetZeroState() (*ton.ZeroStateIDExt, error)
 	GetMasterBlock(ctx context.Context, id *ton.BlockIDExt) (*MasterBlock, bool, error)
 	GetLastMasterBlock(ctx context.Context) (*MasterBlock, bool, error)
-	GetBlock(ctx context.Context, id *ton.BlockIDExt) (*ton.BlockData, bool, error)
-	GetAccountState(ctx context.Context, id *ton.BlockIDExt, addr *address.Address) (*ton.AccountState, bool, error)
 	GetAccountStateInBlock(ctx context.Context, block *Block, addr *address.Address) (*ton.AccountState, bool, error)
 	CacheBlockIfNeeded(ctx context.Context, id *ton.BlockIDExt) (*Block, bool, error)
 }
@@ -575,6 +573,8 @@ func (s *ProxyBalancer) handleRunSmcMethod(ctx context.Context, v *ton.RunSmcMet
 		}, HitTypeFailedInternal
 	}
 
+	log.Debug().Hex("code_hash", st.StateInit.Code.Hash()).Int32("method_id", int32(v.MethodID)).Msg("running get method on contract")
+
 	etm := time.Now()
 	res, err := emulate.RunGetMethod(emulate.RunMethodParams{
 		Code:  st.StateInit.Code,
@@ -598,7 +598,7 @@ func (s *ProxyBalancer) handleRunSmcMethod(ctx context.Context, v *ton.RunSmcMet
 	metrics.Global.RunGetMethodEmulation.Observe(took.Seconds())
 	log.Debug().Dur("took", took).Msg("get method emulation finished")
 
-	var stateProof, c7 *cell.Cell
+	var stateProof *cell.Cell
 
 	if v.Mode&2 != 0 {
 		stateProof, err = state.State.CreateProof(cell.CreateProofSkeleton())
@@ -610,26 +610,6 @@ func (s *ProxyBalancer) handleRunSmcMethod(ctx context.Context, v *ton.RunSmcMet
 				Text: "failed to prepare state proof args: " + err.Error(),
 			}, HitTypeFailedInternal
 		}
-	}
-
-	if v.Mode&8 != 0 {
-		// short c7 for response
-		c7t, err := emulate.PrepareC7(addr, time.Now(), seed, st.Balance.Nano(), nil, nil)
-		if err != nil {
-			return ton.LSError{
-				Code: 500,
-				Text: "failed to prepare c7: " + err.Error(),
-			}, HitTypeFailedInternal
-		}
-
-		b := cell.BeginCell()
-		if err = tlb.SerializeStackValue(b, c7t); err != nil {
-			return ton.LSError{
-				Code: 500,
-				Text: "failed to build c7 tuple: " + err.Error(),
-			}, HitTypeFailedInternal
-		}
-		c7 = b.EndCell()
 	}
 
 	hit := HitTypeBackend
@@ -647,7 +627,7 @@ func (s *ProxyBalancer) handleRunSmcMethod(ctx context.Context, v *ton.RunSmcMet
 		ShardProof: state.ShardProof,
 		Proof:      state.Proof,
 		StateProof: stateProof,
-		InitC7:     c7,
+		InitC7:     c7cell,
 		LibExtras:  nil,
 		ExitCode:   res.ExitCode,
 		Result:     res.Stack,
@@ -788,7 +768,7 @@ func (s *ProxyBalancer) handleGetLibraries(ctx context.Context, v *ton.GetLibrar
 }
 
 func (s *ProxyBalancer) handleGetBlock(ctx context.Context, v *ton.GetBlockData) (tl.Serializable, string) {
-	data, cached, err := s.cache.GetBlock(ctx, v.ID)
+	block, blockFromCache, err := s.cache.CacheBlockIfNeeded(ctx, v.ID)
 	if err != nil {
 		if ls, ok := err.(ton.LSError); ok {
 			return ls, HitTypeFailedValidate
@@ -800,18 +780,47 @@ func (s *ProxyBalancer) handleGetBlock(ctx context.Context, v *ton.GetBlockData)
 		log.Warn().Err(err).Type("request", v).Msg("failed to get block")
 		return ton.LSError{
 			Code: 500,
-			Text: "failed to get block",
+			Text: "failed to resolve block",
 		}, HitTypeFailedInternal
 	}
 
-	if cached {
-		return data, HitTypeCache
+	if block == nil {
+		return nil, HitTypeBackend
 	}
-	return data, HitTypeBackend
+
+	hitType := HitTypeBackend
+	if blockFromCache {
+		hitType = HitTypeCache
+	}
+
+	return &ton.BlockData{
+		ID:      block.ID,
+		Payload: block.Data,
+	}, hitType
 }
 
 func (s *ProxyBalancer) handleGetTransaction(ctx context.Context, v *ton.GetOneTransaction) (tl.Serializable, string) {
-	data, cached, err := s.cache.GetTransaction(ctx, v.ID, v.AccID, v.LT)
+	block, blockFromCache, err := s.cache.CacheBlockIfNeeded(ctx, v.ID)
+	if err != nil {
+		if ls, ok := err.(ton.LSError); ok {
+			return ls, HitTypeFailedValidate
+		}
+		if ctx.Err() != nil {
+			return ErrTimeout, HitTypeFailedValidate
+		}
+
+		log.Warn().Err(err).Type("request", v).Msg("failed to get block")
+		return ton.LSError{
+			Code: 500,
+			Text: "failed to resolve block",
+		}, HitTypeFailedInternal
+	}
+
+	if block == nil {
+		return nil, HitTypeBackend
+	}
+
+	data, err := s.cache.GetTransaction(ctx, block, v.AccID, v.LT)
 	if err != nil {
 		if ls, ok := err.(ton.LSError); ok {
 			return ls, HitTypeFailedValidate
@@ -827,14 +836,34 @@ func (s *ProxyBalancer) handleGetTransaction(ctx context.Context, v *ton.GetOneT
 		}, HitTypeFailedInternal
 	}
 
-	if cached {
+	if blockFromCache {
 		return data, HitTypeEmulated
 	}
 	return data, HitTypeBackend
 }
 
 func (s *ProxyBalancer) handleGetAccount(ctx context.Context, v *ton.GetAccountState) (tl.Serializable, string) {
-	state, cachedState, err := s.cache.GetAccountState(ctx, v.ID, address.NewAddress(0, byte(v.Account.Workchain), v.Account.ID))
+	block, blockFromCache, err := s.cache.CacheBlockIfNeeded(ctx, v.ID)
+	if err != nil {
+		if ls, ok := err.(ton.LSError); ok {
+			return ls, HitTypeFailedValidate
+		}
+		if ctx.Err() != nil {
+			return ErrTimeout, HitTypeFailedValidate
+		}
+
+		log.Warn().Err(err).Type("request", v).Msg("failed to get block")
+		return ton.LSError{
+			Code: 500,
+			Text: "failed to resolve block",
+		}, HitTypeFailedInternal
+	}
+
+	if block == nil {
+		return nil, HitTypeBackend
+	}
+
+	state, cachedState, err := s.cache.GetAccountStateInBlock(ctx, block, address.NewAddress(0, byte(v.Account.Workchain), v.Account.ID))
 	if err != nil {
 		if ls, ok := err.(ton.LSError); ok {
 			return ls, HitTypeFailedValidate
@@ -850,7 +879,7 @@ func (s *ProxyBalancer) handleGetAccount(ctx context.Context, v *ton.GetAccountS
 		}, HitTypeFailedInternal
 	}
 
-	if cachedState {
+	if blockFromCache && cachedState {
 		return state, HitTypeCache
 	}
 	return state, HitTypeBackend

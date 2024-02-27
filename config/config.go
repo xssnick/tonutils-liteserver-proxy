@@ -77,10 +77,10 @@ func LoadConfig(path string) (*Config, error) {
 			DisableEmulationAndCache: false,
 			BalancerType:             "fail_over",
 			CacheConfig: CacheConfig{
-				MaxCachedAccountsPerBlock:      128,
-				MaxCachedLibraries:             8192,
-				MaxMasterBlockSeqnoDiffToCache: 60,
-				MaxShardBlockSeqnoDiffToCache:  60,
+				MaxCachedAccountsPerBlock:      512,
+				MaxCachedLibraries:             1024 * 32,
+				MaxMasterBlockSeqnoDiffToCache: 128,
+				MaxShardBlockSeqnoDiffToCache:  128,
 			},
 			Clients: []ClientConfig{
 				{
@@ -97,13 +97,12 @@ func LoadConfig(path string) (*Config, error) {
 					Key:  exampleKey,
 				},
 			},
-			MaxConnectionsPerIP:      20,
+			MaxConnectionsPerIP:      50,
 			MaxKeepAliveSeconds:      60,
-			ResponseGeneralCacheSize: 2048,
+			ResponseGeneralCacheSize: 1024 * 16,
 		}
 
-		err = SaveConfig(cfg, path)
-		if err != nil {
+		if err = SaveConfig(cfg, path); err != nil {
 			return nil, fmt.Errorf("failed to save config: %w", err)
 		}
 

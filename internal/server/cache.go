@@ -704,20 +704,7 @@ func (c *BlockCache) GetBlock(ctx context.Context, id *ton.BlockIDExt) (*ton.Blo
 	}, cached, nil
 }
 
-func (c *BlockCache) GetTransaction(ctx context.Context, id *ton.BlockIDExt, account *ton.AccountID, lt int64) (*ton.TransactionInfo, bool, error) {
-	block, cached, err := c.CacheBlockIfNeeded(ctx, id)
-	if err != nil {
-		return nil, false, err
-	}
-
-	if block == nil {
-		tx, err := getTransaction(ctx, c.balancer.GetClient(), id, account, lt)
-		if err != nil {
-			return nil, false, err
-		}
-		return tx, false, nil
-	}
-
+func (c *BlockCache) GetTransaction(ctx context.Context, block *Block, account *ton.AccountID, lt int64) (*ton.TransactionInfo, error) {
 	sk := cell.CreateProofSkeleton()
 	pathToDict := sk.ProofRef(3).ProofRef(2).ProofRef(0)
 
@@ -725,15 +712,15 @@ func (c *BlockCache) GetTransaction(ctx context.Context, id *ton.BlockIDExt, acc
 	acc, accProofPath, err := block.ShardAccounts.Accounts.LoadValueWithProof(accKey, pathToDict)
 	if err != nil {
 		return &ton.TransactionInfo{
-			ID:          id,
+			ID:          block.ID,
 			Proof:       nil,
 			Transaction: nil,
-		}, cached, nil
+		}, nil
 	}
 
 	if err = tlb.LoadFromCell(new(tlb.CurrencyCollection), acc); err != nil {
 		log.Warn().Err(err).Int64("lt", lt).Msg("failed to load currency collection from shard account")
-		return nil, false, ton.LSError{
+		return nil, ton.LSError{
 			Code: 500,
 			Text: "failed to load currency collection from shard account",
 		}
@@ -742,7 +729,7 @@ func (c *BlockCache) GetTransaction(ctx context.Context, id *ton.BlockIDExt, acc
 	var accBlock tlb.AccountBlock
 	if err = tlb.LoadFromCell(&accBlock, acc); err != nil {
 		log.Warn().Err(err).Int64("lt", lt).Msg("failed to load account block from shard account")
-		return nil, false, ton.LSError{
+		return nil, ton.LSError{
 			Code: 500,
 			Text: "failed to load account block from shard account",
 		}
@@ -752,16 +739,16 @@ func (c *BlockCache) GetTransaction(ctx context.Context, id *ton.BlockIDExt, acc
 	accTx, _, err := accBlock.Transactions.LoadValueWithProof(key, accProofPath)
 	if err != nil {
 		return &ton.TransactionInfo{
-			ID:          id,
+			ID:          block.ID,
 			Proof:       nil,
 			Transaction: nil,
-		}, cached, nil
+		}, nil
 	}
 
 	proof, err := block.Data.CreateProof(sk)
 	if err != nil {
 		log.Warn().Err(err).Int64("lt", lt).Msg("failed to create transaction proof")
-		return nil, false, ton.LSError{
+		return nil, ton.LSError{
 			Code: 500,
 			Text: "failed to create proof",
 		}
@@ -770,17 +757,17 @@ func (c *BlockCache) GetTransaction(ctx context.Context, id *ton.BlockIDExt, acc
 	tx, err := accTx.LoadRefCell()
 	if err != nil {
 		log.Warn().Err(err).Int64("lt", lt).Msg("failed to load transaction ref")
-		return nil, false, ton.LSError{
+		return nil, ton.LSError{
 			Code: 500,
 			Text: "failed to load transaction ref",
 		}
 	}
 
 	return &ton.TransactionInfo{
-		ID:          id,
+		ID:          block.ID,
 		Proof:       proof.ToBOC(),
 		Transaction: tx.ToBOC(),
-	}, cached, nil
+	}, nil
 }
 
 func getAccount(ctx context.Context, client ton.LiteClient, block *ton.BlockIDExt, addr *address.Address) (*ton.AccountState, error) {
@@ -801,26 +788,6 @@ func getAccount(ctx context.Context, client ton.LiteClient, block *ton.BlockIDEx
 		if !t.ID.Equals(block) {
 			return nil, fmt.Errorf("response with incorrect block")
 		}
-		return &t, nil
-	case ton.LSError:
-		return nil, t
-	}
-	return nil, fmt.Errorf("unexpected response")
-}
-
-func getTransaction(ctx context.Context, client ton.LiteClient, block *ton.BlockIDExt, acc *ton.AccountID, lt int64) (*ton.TransactionInfo, error) {
-	var resp tl.Serializable
-	err := client.QueryLiteserver(ctx, ton.GetOneTransaction{
-		ID:    block,
-		AccID: acc,
-		LT:    lt,
-	}, &resp)
-	if err != nil {
-		return nil, err
-	}
-
-	switch t := resp.(type) {
-	case ton.TransactionInfo:
 		return &t, nil
 	case ton.LSError:
 		return nil, t
