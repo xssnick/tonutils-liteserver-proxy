@@ -46,6 +46,7 @@ type ShardBlock struct {
 type Block struct {
 	ID            *ton.BlockIDExt
 	Data          *cell.Cell
+	DataRaw       []byte // TODO: align boc serialization to be same with c++, because of file hash
 	ShardAccounts *tlb.ShardAccountBlocks
 
 	MasterID *ton.BlockIDExt
@@ -244,7 +245,7 @@ func (c *BlockCache) GetMasterBlock(ctx context.Context, id *ton.BlockIDExt) (*M
 		return b, true, nil
 	}
 
-	blockCell, err := getBlock(ctx, c.balancer.GetClient(), id)
+	blockRaw, blockCell, err := getBlock(ctx, c.balancer.GetClient(), id)
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to get block data: %w", err)
 	}
@@ -314,6 +315,7 @@ func (c *BlockCache) GetMasterBlock(ctx context.Context, id *ton.BlockIDExt) (*M
 	b.Block = Block{
 		ID:            id,
 		Data:          blockCell,
+		DataRaw:       blockRaw,
 		ShardAccounts: &shardAccounts,
 		accountsCache: cache,
 		MasterID:      id,
@@ -612,7 +614,7 @@ func (c *BlockCache) CacheBlockIfNeeded(ctx context.Context, id *ton.BlockIDExt)
 			defer b.mx.Unlock()
 
 			if b.Data == nil {
-				blk, err := getBlock(ctx, c.balancer.GetClient(), id)
+				blockRaw, blk, err := getBlock(ctx, c.balancer.GetClient(), id)
 				if err != nil {
 					return nil, false, err
 				}
@@ -644,6 +646,7 @@ func (c *BlockCache) CacheBlockIfNeeded(ctx context.Context, id *ton.BlockIDExt)
 					FileHash:  block.BlockInfo.MasterRef.FileHash,
 				}
 				b.Data = blk
+				b.DataRaw = blockRaw
 				b.ShardAccounts = &shardAccounts
 			} else {
 				fromCache = true
@@ -677,31 +680,6 @@ func (c *BlockCache) CacheBlockIfNeeded(ctx context.Context, id *ton.BlockIDExt)
 	}
 
 	return data, fromCache, nil
-}
-
-func (c *BlockCache) GetBlock(ctx context.Context, id *ton.BlockIDExt) (*ton.BlockData, bool, error) {
-	block, cached, err := c.CacheBlockIfNeeded(ctx, id)
-	if err != nil {
-		return nil, false, err
-	}
-
-	if block == nil {
-		// just fetch block from ls
-		blk, err := getBlock(ctx, c.balancer.GetClient(), id)
-		if err != nil {
-			return nil, false, err
-		}
-
-		return &ton.BlockData{
-			ID:      id,
-			Payload: blk,
-		}, false, nil
-	}
-
-	return &ton.BlockData{
-		ID:      block.ID,
-		Payload: block.Data,
-	}, cached, nil
 }
 
 func (c *BlockCache) GetTransaction(ctx context.Context, block *Block, account *ton.AccountID, lt int64) (*ton.TransactionInfo, error) {
@@ -831,23 +809,28 @@ func getShardKey(wc int32, shard int64) string {
 	return fmt.Sprint(wc) + ":" + fmt.Sprint(shard)
 }
 
-func getBlock(ctx context.Context, client ton.LiteClient, block *ton.BlockIDExt) (*cell.Cell, error) {
+func getBlock(ctx context.Context, client ton.LiteClient, block *ton.BlockIDExt) ([]byte, *cell.Cell, error) {
 	var resp tl.Serializable
 	err := client.QueryLiteserver(ctx, ton.GetBlockData{ID: block}, &resp)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	switch t := resp.(type) {
 	case ton.BlockData:
-		if !bytes.Equal(t.Payload.Hash(), block.RootHash) {
-			return nil, fmt.Errorf("incorrect block")
+		pl, err := cell.FromBOC(t.Payload)
+		if err != nil {
+			return nil, nil, err
 		}
-		return t.Payload, nil
+
+		if !bytes.Equal(pl.Hash(), block.RootHash) {
+			return nil, nil, fmt.Errorf("incorrect block")
+		}
+		return t.Payload, pl, nil
 	case ton.LSError:
-		return nil, t
+		return nil, nil, t
 	}
-	return nil, fmt.Errorf("unexpected response")
+	return nil, nil, fmt.Errorf("unexpected response")
 }
 
 func getLibraries(ctx context.Context, client ton.LiteClient, hashes ...[]byte) ([]*cell.Cell, error) {

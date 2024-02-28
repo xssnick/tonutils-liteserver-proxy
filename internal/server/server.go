@@ -795,7 +795,7 @@ func (s *ProxyBalancer) handleGetBlock(ctx context.Context, v *ton.GetBlockData)
 
 	return &ton.BlockData{
 		ID:      block.ID,
-		Payload: block.Data,
+		Payload: block.DataRaw,
 	}, hitType
 }
 
