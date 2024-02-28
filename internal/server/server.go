@@ -243,6 +243,10 @@ func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.Server
 				tm := time.Now()
 				hitType := HitTypeBackend
 				if !s.onlyProxy {
+					if wt, ok := q.Data.(ton.WaitMasterchainSeqno); ok {
+						q.Data = []tl.Serializable{wt, wt}
+					}
+
 					switch v := q.Data.(type) {
 					case []tl.Serializable: // wait master probably
 						if len(v) != 2 {
@@ -290,6 +294,13 @@ func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.Server
 						hitType = HitTypeEmulated
 						resp = ton.CurrentTime{
 							Now: uint32(time.Now().Unix()),
+						}
+					case ton.WaitMasterchainSeqno:
+						// we simulated it before, but there is no following request type, so we answer same as LS
+						hitType = HitTypeEmulated
+						resp = ton.LSError{
+							Code: 0,
+							Text: "Not enough data to read at 0",
 						}
 					case ton.GetMasterchainInfoExt:
 						resp, hitType = s.handleGetMasterchainInfoExt(ctx, &v)
