@@ -35,8 +35,6 @@ type RunResult struct {
 	ExitCode int32      `tlb:"## 32"`
 	GasUsed  int64      `tlb:"## 64"`
 	Stack    *cell.Cell `tlb:"^"`
-
-	C7 *cell.Cell `tlb:"-"`
 }
 
 func init() {
