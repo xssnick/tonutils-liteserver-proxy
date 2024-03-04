@@ -447,7 +447,7 @@ func getBlockchainConfig(ctx context.Context, client ton.LiteClient, block *ton.
 
 	switch t := resp.(type) {
 	case ton.ConfigAll:
-		stateExtra, err := ton.CheckShardMcStateExtraProof(block, []*cell.Cell{t.ConfigProof, t.StateProof})
+		stateExtra, err := ton.CheckShardMcStateExtraProof(block, []*cell.Cell{t.StateProof, t.ConfigProof})
 		if err != nil {
 			return nil, fmt.Errorf("incorrect proof: %w", err)
 		}
