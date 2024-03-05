@@ -578,6 +578,11 @@ func (c *BlockCache) CacheBlockIfNeeded(ctx context.Context, id *ton.BlockIDExt)
 
 		if si == nil {
 			log.Debug().Str("key", shardKey).Msg("no shard info in cache")
+		} else if !needCache {
+			log.Debug().Str("key", shardKey).Uint32("seqno", id.SeqNo).
+				Uint32("last_seqno", si.lastBlock.SeqNo).
+				Uint32("max_diff", c.config.MaxShardBlockSeqnoDiffToCache).
+				Msg("block is not for caching")
 		}
 
 		if b != nil {
