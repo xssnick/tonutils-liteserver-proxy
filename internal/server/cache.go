@@ -583,6 +583,11 @@ func (c *BlockCache) CacheBlockIfNeeded(ctx context.Context, id *ton.BlockIDExt)
 				Uint32("last_seqno", si.lastBlock.SeqNo).
 				Uint32("max_diff", c.config.MaxShardBlockSeqnoDiffToCache).
 				Msg("block is not for caching")
+		} else {
+			log.Debug().Str("key", shardKey).Uint32("seqno", id.SeqNo).
+				Uint32("last_seqno", si.lastBlock.SeqNo).
+				Uint32("max_diff", c.config.MaxShardBlockSeqnoDiffToCache).
+				Msg("block is cacheable")
 		}
 
 		if b != nil {
@@ -657,6 +662,8 @@ func (c *BlockCache) CacheBlockIfNeeded(ctx context.Context, id *ton.BlockIDExt)
 				fromCache = true
 			}
 			data = &b.Block
+
+			log.Debug().Uint32("seqno", id.SeqNo).Msg("shard block resolved")
 		}
 	} else {
 		c.mx.RLock()
