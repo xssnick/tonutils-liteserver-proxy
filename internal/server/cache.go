@@ -672,6 +672,23 @@ func (c *BlockCache) CacheBlockIfNeeded(ctx context.Context, id *ton.BlockIDExt)
 		c.mx.RUnlock()
 
 		if b != nil && b.Block.ID != nil {
+			log.Debug().Uint32("seqno", id.SeqNo).
+				Uint32("last_seqno", c.lastBlock.SeqNo).
+				Uint32("max_diff", c.config.MaxMasterBlockSeqnoDiffToCache).
+				Msg("master block in cache")
+		} else if !needCache {
+			log.Debug().Uint32("seqno", id.SeqNo).
+				Uint32("last_seqno", c.lastBlock.SeqNo).
+				Uint32("max_diff", c.config.MaxMasterBlockSeqnoDiffToCache).
+				Msg("master block is not for caching")
+		} else {
+			log.Debug().Uint32("seqno", id.SeqNo).
+				Uint32("last_seqno", c.lastBlock.SeqNo).
+				Uint32("max_diff", c.config.MaxMasterBlockSeqnoDiffToCache).
+				Msg("master block is cacheable")
+		}
+
+		if b != nil && b.Block.ID != nil {
 			if !b.Block.ID.Equals(id) {
 				return nil, false, ton.LSError{
 					Code: 651,
