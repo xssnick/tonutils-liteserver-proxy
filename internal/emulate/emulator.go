@@ -52,7 +52,7 @@ func RunGetMethod(params RunMethodParams, maxGas int64) (*RunResult, error) {
 	cReq := C.CBytes(boc)
 	defer C.free(unsafe.Pointer(cReq))
 
-	res := unsafe.Pointer(C.tvm_emulator_emulate(C.uint32_t(len(boc)), (*C.char)(cReq), C.int64_t(maxGas)))
+	res := unsafe.Pointer(C.tvm_emulator_emulate_run_method(C.uint32_t(len(boc)), (*C.char)(cReq), C.int64_t(maxGas)))
 	if res == nil {
 		return nil, fmt.Errorf("failed to execute tvm")
 	}
