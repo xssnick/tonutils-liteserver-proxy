@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"flag"
+	"fmt"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -30,6 +31,9 @@ func main() {
 	switch *Verbosity {
 	case 3:
 		log.Logger = log.Logger.Level(zerolog.DebugLevel).With().Logger()
+		liteclient.Logger = func(v ...any) {
+			log.Logger.Debug().Str("type", "LITECLIENT").Msg(fmt.Sprint(v...))
+		}
 	case 2:
 		log.Logger = log.Logger.Level(zerolog.InfoLevel).With().Logger()
 	case 1:
