@@ -35,6 +35,7 @@ const HitTypeFailedValidate = "failed_validate"
 const HitTypeFailedInternal = "failed_internal"
 
 type Cache interface {
+	MethodEmulationEnabled() bool
 	LookupBlockInCache(id *ton.BlockInfoShort) (*ton.BlockHeader, error)
 	GetTransaction(ctx context.Context, block *Block, account *ton.AccountID, lt int64) (*ton.TransactionInfo, error)
 	GetLibraries(ctx context.Context, hashes [][]byte) (*cell.Dictionary, bool, error)
@@ -410,7 +411,7 @@ func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.Server
 					}
 				}
 
-				if !s.onlyProxy && resp == nil {
+				if !s.onlyProxy && resp == nil && s.cache.MethodEmulationEnabled() {
 					// we have it here to cache calls, because they are heavy
 					if v, ok := q.Data.(ton.RunSmcMethod); ok {
 						resp, hitType = s.handleRunSmcMethod(ctx, &v)

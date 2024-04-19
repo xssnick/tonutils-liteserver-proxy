@@ -77,6 +77,7 @@ func LoadConfig(path string) (*Config, error) {
 			DisableEmulationAndCache: false,
 			BalancerType:             "fail_over",
 			CacheConfig: CacheConfig{
+				DisableGetMethodsEmulation:     false,
 				MaxCachedAccountsPerBlock:      512,
 				MaxCachedLibraries:             1024 * 32,
 				MaxMasterBlockSeqnoDiffToCache: 128,
