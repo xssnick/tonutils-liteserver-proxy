@@ -562,6 +562,10 @@ func (c *BlockCache) LookupBlockInCache(id *ton.BlockInfoShort) (*ton.BlockHeade
 	return nil, nil
 }
 
+func (c *BlockCache) MethodEmulationEnabled() bool {
+	return !c.config.DisableGetMethodsEmulation
+}
+
 func (c *BlockCache) CacheBlockIfNeeded(ctx context.Context, id *ton.BlockIDExt) (*Block, bool, error) {
 	var fromCache bool
 	var data *Block
