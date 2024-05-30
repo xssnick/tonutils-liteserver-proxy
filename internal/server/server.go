@@ -41,7 +41,7 @@ type Cache interface {
 	GetLibraries(ctx context.Context, hashes [][]byte) (*cell.Dictionary, bool, error)
 	WaitMasterBlock(ctx context.Context, seqno uint32, timeout time.Duration) error
 	GetZeroState() (*ton.ZeroStateIDExt, error)
-	GetMasterBlock(ctx context.Context, id *ton.BlockIDExt) (*MasterBlock, bool, error)
+	GetMasterBlock(ctx context.Context, id *ton.BlockIDExt, skipChecks bool) (*MasterBlock, bool, error)
 	GetLastMasterBlock(ctx context.Context) (*MasterBlock, bool, error)
 	GetAccountStateInBlock(ctx context.Context, block *Block, addr *address.Address) (*ton.AccountState, bool, error)
 	CacheBlockIfNeeded(ctx context.Context, id *ton.BlockIDExt) (*Block, bool, error)
@@ -485,7 +485,7 @@ func (s *ProxyBalancer) handleRunSmcMethod(ctx context.Context, v *ton.RunSmcMet
 		return nil, HitTypeBackend
 	}
 
-	masterBlock, cachedMasterBlock, err := s.cache.GetMasterBlock(ctx, block.MasterID)
+	masterBlock, cachedMasterBlock, err := s.cache.GetMasterBlock(ctx, block.MasterID, false)
 	if err != nil {
 		if ls, ok := err.(ton.LSError); ok {
 			return ls, HitTypeFailedValidate
@@ -589,11 +589,16 @@ func (s *ProxyBalancer) handleRunSmcMethod(ctx context.Context, v *ton.RunSmcMet
 
 	log.Debug().Hex("code_hash", st.StateInit.Code.Hash()).Int32("method_id", int32(v.MethodID)).Msg("running get method on contract")
 
+	params := v.Params
+	if v.Params == nil {
+		params = cell.BeginCell().EndCell()
+	}
+
 	etm := time.Now()
 	res, err := emulate.RunGetMethod(emulate.RunMethodParams{
 		Code:  st.StateInit.Code,
 		Data:  st.StateInit.Data,
-		Stack: v.Params,
+		Stack: params,
 		Params: emulate.MethodConfig{
 			C7:   c7cell,
 			Libs: libsCell,

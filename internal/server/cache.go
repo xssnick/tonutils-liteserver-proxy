@@ -126,7 +126,7 @@ func NewBlockCache(config config.CacheConfig, balancer *BackendBalancer) *BlockC
 			}
 
 			ctx, cancel = context.WithTimeout(context.Background(), 8*time.Second)
-			block, _, err := b.GetMasterBlock(ctx, inf.Last)
+			block, _, err := b.GetMasterBlock(ctx, inf.Last, true)
 			cancel()
 			if err != nil {
 				log.Warn().Err(err).Msg("fetch new master block failed, we will retry in 1s")
@@ -194,7 +194,7 @@ func (c *BlockCache) GetLibraries(ctx context.Context, hashes [][]byte) (*cell.D
 	return libs, false, nil
 }
 
-func (c *BlockCache) GetMasterBlock(ctx context.Context, id *ton.BlockIDExt) (*MasterBlock, bool, error) {
+func (c *BlockCache) GetMasterBlock(ctx context.Context, id *ton.BlockIDExt, skipChecks bool) (*MasterBlock, bool, error) {
 	if id.Workchain != -1 {
 		return nil, false, fmt.Errorf("not a master workchain: %d %d", id.Workchain, id.SeqNo)
 	}
@@ -207,17 +207,19 @@ func (c *BlockCache) GetMasterBlock(ctx context.Context, id *ton.BlockIDExt) (*M
 	}
 	c.mx.RUnlock()
 
-	if lastSeqno > 0 && id.SeqNo < lastSeqno-c.config.MaxMasterBlockSeqnoDiffToCache {
-		return nil, false, ton.LSError{
-			Code: 410,
-			Text: "too old master info requested",
+	if !skipChecks {
+		if lastSeqno > 0 && id.SeqNo < lastSeqno-c.config.MaxMasterBlockSeqnoDiffToCache {
+			return nil, false, ton.LSError{
+				Code: 410,
+				Text: "too old master info requested",
+			}
 		}
-	}
 
-	if lastSeqno > 0 && id.SeqNo > lastSeqno+200 {
-		return nil, false, ton.LSError{
-			Code: 411,
-			Text: "too future block",
+		if lastSeqno > 0 && id.SeqNo > lastSeqno+200 {
+			return nil, false, ton.LSError{
+				Code: 411,
+				Text: "too future block",
+			}
 		}
 	}
 
@@ -396,7 +398,7 @@ func (c *BlockCache) GetLastMasterBlock(ctx context.Context) (*MasterBlock, bool
 		return nil, false, fmt.Errorf("last master is not fetched yet")
 	}
 
-	return c.GetMasterBlock(ctx, lb)
+	return c.GetMasterBlock(ctx, lb, false)
 }
 
 func (c *BlockCache) WaitMasterBlock(ctx context.Context, seqno uint32, timeout time.Duration) error {
@@ -703,7 +705,7 @@ func (c *BlockCache) CacheBlockIfNeeded(ctx context.Context, id *ton.BlockIDExt)
 			fromCache = true
 		} else if needCache {
 			// fetch and cache master block
-			ms, cached, err := c.GetMasterBlock(ctx, id)
+			ms, cached, err := c.GetMasterBlock(ctx, id, false)
 			if err != nil {
 				return nil, false, err
 			}
