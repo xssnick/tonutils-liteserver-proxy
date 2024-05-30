@@ -1,3 +1,5 @@
+.PHONY: proxy lib-linux
+
 proxy:
 	echo "If you will get an error, make sure to compile the library first: compile-lib-linux"
 	CGO_ENABLED=1 go build -o build/liteserver cmd/main.go
