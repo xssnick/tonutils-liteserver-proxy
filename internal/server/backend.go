@@ -139,3 +139,7 @@ func (b *Backend) StickyContextNextNode(ctx context.Context) (context.Context, e
 func (b *Backend) StickyNodeID(ctx context.Context) uint32 {
 	return b.Client.StickyNodeID(ctx)
 }
+
+func (b *Backend) StickyContextNextNodeBalanced(ctx context.Context) (context.Context, error) {
+	return b.Client.StickyContextNextNodeBalanced(ctx)
+}
