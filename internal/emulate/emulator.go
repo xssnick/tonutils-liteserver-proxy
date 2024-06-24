@@ -9,6 +9,7 @@ package emulate
 import "C"
 
 import (
+	"encoding/hex"
 	"fmt"
 	"github.com/xssnick/tonutils-go/address"
 	"github.com/xssnick/tonutils-go/tlb"
@@ -54,7 +55,7 @@ func RunGetMethod(params RunMethodParams, maxGas int64) (*RunResult, error) {
 
 	res := unsafe.Pointer(C.tvm_emulator_emulate_run_method(C.uint32_t(len(boc)), (*C.char)(cReq), C.int64_t(maxGas)))
 	if res == nil {
-		return nil, fmt.Errorf("failed to execute tvm")
+		return nil, fmt.Errorf("failed to execute tvm, req: %s, %s", hex.EncodeToString(boc), req.Dump())
 	}
 	defer C.free(res)
 
