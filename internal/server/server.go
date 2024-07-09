@@ -591,7 +591,7 @@ func (s *ProxyBalancer) handleRunSmcMethod(ctx context.Context, v *ton.RunSmcMet
 
 	params := v.Params
 	if v.Params == nil {
-		params = cell.BeginCell().EndCell()
+		params, _ = new(tlb.Stack).ToCell()
 	}
 
 	etm := time.Now()
