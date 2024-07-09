@@ -606,8 +606,14 @@ func (s *ProxyBalancer) handleRunSmcMethod(ctx context.Context, v *ton.RunSmcMet
 		MethodID: int32(v.MethodID),
 	}, 1_000_000)
 	if err != nil {
+
 		log.Warn().Err(err).Type("request", v).
+			Uint32("mode", v.Mode).
 			Str("addr", addr.String()).
+			Uint32("block", block.ID.SeqNo).
+			Int32("block_wc", block.ID.Workchain).
+			Uint32("block_master", block.MasterID.SeqNo).
+			Int32("acc_wc", v.Account.Workchain).
 			Hex("code_hash", st.StateInit.Code.Hash()).
 			Uint64("method", v.MethodID).
 			Msg("failed to emulate get method, sending to node")
