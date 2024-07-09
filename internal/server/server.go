@@ -606,12 +606,17 @@ func (s *ProxyBalancer) handleRunSmcMethod(ctx context.Context, v *ton.RunSmcMet
 		MethodID: int32(v.MethodID),
 	}, 1_000_000)
 	if err != nil {
-		log.Warn().Err(err).Type("request", v).Msg("failed to emulate get method")
+		log.Warn().Err(err).Type("request", v).
+			Str("addr", addr.String()).
+			Hex("code_hash", st.StateInit.Code.Hash()).
+			Uint64("method", v.MethodID).
+			Msg("failed to emulate get method, sending to node")
 
-		return ton.LSError{
+		return nil, HitTypeBackend
+		/*return ton.LSError{
 			Code: 500,
 			Text: "failed to emulate run method: " + err.Error(),
-		}, HitTypeFailedInternal
+		}, HitTypeFailedInternal*/
 	}
 	took := time.Since(etm)
 	metrics.Global.RunGetMethodEmulation.Observe(took.Seconds())
