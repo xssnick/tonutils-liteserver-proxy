@@ -7,7 +7,7 @@ require (
 	github.com/kevinms/leakybucket-go v0.0.0-20200115003610-082473db97ca
 	github.com/prometheus/client_golang v1.18.0
 	github.com/rs/zerolog v1.32.0
-	github.com/xssnick/tonutils-go v1.9.8-0.20240621104502-7d687bd91e42
+	github.com/xssnick/tonutils-go v1.9.9-0.20240725150039-2ec0b5d2d523
 )
 
 require (
