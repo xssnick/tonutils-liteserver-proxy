@@ -1,8 +1,16 @@
-.PHONY: proxy lib-linux
+.PHONY: proxy proxy-noemu lib-linux pub-metrics
 
 proxy:
 	echo "If you will get an error, make sure to compile the library first: compile-lib-linux"
 	CGO_ENABLED=1 go build -o build/liteserver cmd/main.go
+
+proxy-noemu:
+	echo "If you will get an error, make sure to compile the library first: compile-lib-linux"
+	go build -tags noemu -o build/liteserver cmd/main.go
+
+pub-metrics:
+	go build -o build/pub-metrics cmd/pub-metric/main.go
+
 
 lib-linux:
 	git submodule update --remote --merge
