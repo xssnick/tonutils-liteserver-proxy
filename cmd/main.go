@@ -80,7 +80,15 @@ func main() {
 	log.Info().Str("addr", cfg.ListenAddr).Msg("listening tcp")
 	proxy := server.NewProxyBalancer(cfg.Clients, blc, cache,
 		cfg.DisableEmulationAndCache, int(cfg.MaxConnectionsPerIP), time.Duration(cfg.MaxKeepAliveSeconds)*time.Second,
-		int(cfg.ResponseGeneralCacheSize))
+		map[string]int{
+			"general":           int(cfg.ResponseGeneralCacheSize) / 2,
+			"get_account":       int(cfg.ResponseGeneralCacheSize) / 2,
+			"run_method":        int(cfg.ResponseGeneralCacheSize) / 2,
+			"get_config":        50,
+			"get_proof":         300,
+			"lookup_block":      500,
+			"list_transactions": 1000,
+		})
 	if err = proxy.Listen(cfg.ListenAddr); err != nil {
 		log.Fatal().Err(err).Msg("listen failed")
 		return

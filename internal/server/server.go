@@ -34,6 +34,28 @@ const HitTypeInflightCache = "inflight_cache"
 const HitTypeFailedValidate = "failed_validate"
 const HitTypeFailedInternal = "failed_internal"
 
+const (
+	GPTypeGeneral = iota
+	GPTypeGetAccount
+	GPTypeGetConfig
+	GPTypeLookupBlock
+	GPTypeRunMethod
+	GPTypeListTransactions
+	GPTypeGetBlockProof
+	GPTypeGetTransaction
+)
+
+var gpMap = map[string]int{
+	"general":           GPTypeGeneral,
+	"get_account":       GPTypeGetAccount,
+	"get_config":        GPTypeGetConfig,
+	"lookup_block":      GPTypeLookupBlock,
+	"run_method":        GPTypeRunMethod,
+	"list_transactions": GPTypeListTransactions,
+	"get_proof":         GPTypeGetBlockProof,
+	"get_transaction":   GPTypeGetTransaction,
+}
+
 type Cache interface {
 	MethodEmulationEnabled() bool
 	LookupBlockInCache(id *ton.BlockInfoShort) (*ton.BlockHeader, error)
@@ -77,7 +99,7 @@ type ProxyBalancer struct {
 	maxConnectionsPerIP int
 	maxKeepAlive        time.Duration
 
-	gpCache *lru.ARCCache
+	gpCache map[int]*lru.ARCCache
 
 	inflightCache map[uint64]*CacheWaiter
 	iflCacheMx    sync.RWMutex
@@ -91,7 +113,7 @@ type KeyConfig struct {
 	limiterPerKey *leakybucket.LeakyBucket
 }
 
-func NewProxyBalancer(configs []config.ClientConfig, backendBalancer *BackendBalancer, cache Cache, onlyProxy bool, maxConnectionsPerIP int, maxKeepAlive time.Duration, gpCacheSize int) *ProxyBalancer {
+func NewProxyBalancer(configs []config.ClientConfig, backendBalancer *BackendBalancer, cache Cache, onlyProxy bool, maxConnectionsPerIP int, maxKeepAlive time.Duration, gpCacheSizes map[string]int) *ProxyBalancer {
 	s := &ProxyBalancer{
 		backendBalancer:     backendBalancer,
 		configs:             map[string]*KeyConfig{},
@@ -103,11 +125,16 @@ func NewProxyBalancer(configs []config.ClientConfig, backendBalancer *BackendBal
 		inflightCache:       map[uint64]*CacheWaiter{},
 	}
 
-	if gpCacheSize > 0 {
-		var err error
-		s.gpCache, err = lru.NewARC(gpCacheSize)
-		if err != nil {
-			panic("failed to init general purpose cache: " + err.Error())
+	s.gpCache = map[int]*lru.ARCCache{}
+	for k, v := range gpMap {
+		sz := gpCacheSizes[k]
+		if sz > 0 {
+			var err error
+			s.gpCache[v], err = lru.NewARC(sz)
+			if err != nil {
+				panic("failed to init general purpose cache: " + err.Error())
+			}
+			println(k, v, sz)
 		}
 	}
 
@@ -243,6 +270,7 @@ func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.Server
 
 				tm := time.Now()
 				hitType := HitTypeBackend
+				gpType := GPTypeGeneral
 				if !s.onlyProxy {
 					if wt, ok := q.Data.(ton.WaitMasterchainSeqno); ok {
 						q.Data = []tl.Serializable{wt, wt}
@@ -311,25 +339,32 @@ func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.Server
 						resp, hitType = s.handleGetLibraries(ctx, &v)
 					case ton.GetOneTransaction:
 						resp, hitType = s.handleGetTransaction(ctx, &v)
+						gpType = GPTypeGetTransaction
 					case ton.GetBlockData:
 						resp, hitType = s.handleGetBlock(ctx, &v)
 					case ton.GetAccountState:
 						resp, hitType = s.handleGetAccount(ctx, &v)
+						gpType = GPTypeGetAccount
 					case ton.LookupBlock:
 						resp, hitType = s.handleLookupBlock(ctx, &v)
+						gpType = GPTypeLookupBlock
 					case ton.GetBlockHeader:
 					case ton.GetConfigAll:
-					case ton.GetBlockProof:
+						gpType = GPTypeGetConfig
+					case ton.GetBlockProof, ton.GetShardBlockProof:
+						gpType = GPTypeGetBlockProof
 					case ton.GetConfigParams:
+						gpType = GPTypeGetConfig
 					case ton.GetAllShardsInfo:
-					case ton.ListBlockTransactions:
-					case ton.ListBlockTransactionsExt:
+					case ton.ListBlockTransactions, ton.ListBlockTransactionsExt:
+						gpType = GPTypeListTransactions
 					case ton.RunSmcMethod:
+						gpType = GPTypeRunMethod
 					case ton.GetState:
 					case ton.GetAccountStatePruned:
 					case ton.GetShardInfo:
 					case ton.GetTransactions:
-					case ton.GetShardBlockProof:
+						gpType = GPTypeListTransactions
 					case ton.SendMessage:
 					default:
 						log.Debug().Str("ip", sc.IP()).Type("request", q.Data).Msg("unknown request type")
@@ -353,8 +388,14 @@ func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.Server
 					log.Debug().Str("ip", sc.IP()).Type("request", q.Data).Type("response", resp).Dur("took", snc).Msg("query finished")
 				}()
 
+				gp := s.gpCache[gpType]
+				if gp == nil {
+					// fallback to general if ot configured
+					gp = s.gpCache[GPTypeGeneral]
+				}
+
 				var gpKey uint64
-				if resp == nil && s.gpCache != nil {
+				if resp == nil && gp != nil {
 					rqData, err := tl.Serialize(q.Data, true)
 					if err != nil {
 						log.Warn().Type("request", q.Data).Msg("serialization for hash failed")
@@ -403,7 +444,7 @@ func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.Server
 					}
 
 					if resp == nil {
-						resp, _ = s.gpCache.Get(gpKey)
+						resp, _ = gp.Get(gpKey)
 						if resp != nil {
 							log.Debug().Type("request", q.Data).Type("response", resp).Msg("fetched from gp cache")
 							hitType = HitTypeGPCache
@@ -440,10 +481,10 @@ func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.Server
 								Text: "backend node timeout",
 							}
 						}
-					} else if s.gpCache != nil {
+					} else if gp != nil {
 						if _, ok := resp.(ton.LSError); !ok {
 							// do not cache errors
-							s.gpCache.Add(gpKey, resp)
+							gp.Add(gpKey, resp)
 						}
 					}
 				}
@@ -455,6 +496,12 @@ func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.Server
 		}
 	case liteclient.TCPPing:
 		return sc.Send(liteclient.TCPPong{RandomID: m.RandomID})
+	case liteclient.TCPAuthenticate: // fake auth
+		rn := make([]byte, 64)
+		_, _ = rand.Read(rn)
+		return sc.Send(liteclient.TCPAuthenticationNonce{Nonce: rn})
+	case liteclient.TCPAuthenticationComplete:
+		log.Debug().Type("ip", sc.IP()).Msg("auth complete")
 	}
 
 	return fmt.Errorf("something unknown: %s", reflect.TypeOf(msg).String())
