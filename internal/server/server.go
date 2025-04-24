@@ -134,7 +134,6 @@ func NewProxyBalancer(configs []config.ClientConfig, backendBalancer *BackendBal
 			if err != nil {
 				panic("failed to init general purpose cache: " + err.Error())
 			}
-			println(k, v, sz)
 		}
 	}
 
