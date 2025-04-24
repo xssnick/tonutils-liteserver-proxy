@@ -501,7 +501,8 @@ func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.Server
 		_, _ = rand.Read(rn)
 		return sc.Send(liteclient.TCPAuthenticationNonce{Nonce: rn})
 	case liteclient.TCPAuthenticationComplete:
-		log.Debug().Type("ip", sc.IP()).Msg("auth complete")
+		log.Debug().Type("ip", sc.IP()).Msg("auth completed")
+		return nil
 	}
 
 	return fmt.Errorf("something unknown: %s", reflect.TypeOf(msg).String())
