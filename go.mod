@@ -7,7 +7,7 @@ require (
 	github.com/kevinms/leakybucket-go v0.0.0-20200115003610-082473db97ca
 	github.com/prometheus/client_golang v1.18.0
 	github.com/rs/zerolog v1.32.0
-	github.com/xssnick/tonutils-go v1.9.9-0.20240725150039-2ec0b5d2d523
+	github.com/xssnick/tonutils-go v1.12.0
 )
 
 require (
@@ -21,7 +21,7 @@ require (
 	github.com/prometheus/common v0.45.0 // indirect
 	github.com/prometheus/procfs v0.12.0 // indirect
 	github.com/sigurn/crc16 v0.0.0-20211026045750-20ab5afb07e3 // indirect
-	golang.org/x/crypto v0.17.0 // indirect
-	golang.org/x/sys v0.15.0 // indirect
+	golang.org/x/crypto v0.32.0 // indirect
+	golang.org/x/sys v0.29.0 // indirect
 	google.golang.org/protobuf v1.31.0 // indirect
 )
