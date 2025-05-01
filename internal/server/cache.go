@@ -184,6 +184,8 @@ func (c *BlockCache) GetLibraries(ctx context.Context, hashes [][]byte) (*cell.D
 
 	for i, cl := range fetchedLibs {
 		if cl != nil {
+			cl = cell.BeginCell().MustStoreRef(cl).EndCell()
+			
 			c.libsCache.Add(string(toFetch[i]), cl)
 			if err = libs.Set(cell.BeginCell().MustStoreSlice(cl.Hash(), 256).EndCell(), cl); err != nil {
 				return nil, false, err
