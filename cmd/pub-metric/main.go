@@ -93,11 +93,13 @@ func main() {
 	}
 
 	go func() {
+		lastSeqno := float64(0)
+		seqnos := map[string]float64{}
+
+		var mx sync.Mutex
+		states := map[string]float64{}
+
 		for {
-			var mx sync.Mutex
-			states := map[string]float64{}
-			seqnos := map[string]float64{}
-			lastSeqno := float64(0)
 
 			wCtx, cancel := context.WithTimeout(context.Background(), time.Duration(*RetryDelay)*time.Second)
 
@@ -109,6 +111,7 @@ func main() {
 					conn := liteclient.NewConnectionPool()
 					defer conn.Stop()
 
+					startTime := time.Now()
 					err := conn.AddConnection(wCtx, addr, ls.ID.Key)
 					if err != nil {
 						mx.Lock()
@@ -120,7 +123,6 @@ func main() {
 					}
 
 					api := ton.NewAPIClient(conn)
-					startTime := time.Now()
 					info, err := api.GetMasterchainInfo(wCtx)
 					duration := time.Since(startTime)
 					if err != nil {
@@ -136,9 +138,6 @@ func main() {
 					mx.Lock()
 					states[addr] = duration.Seconds()
 					seqnos[addr] = float64(info.SeqNo)
-					if float64(info.SeqNo) > lastSeqno {
-						lastSeqno = float64(info.SeqNo)
-					}
 					mx.Unlock()
 					log.Debug().Str("addr", addr).Dur("duration", duration).Msg("GetMasterchainInfo")
 				}(ls)
@@ -149,6 +148,7 @@ func main() {
 
 			active := 0
 			dead := 0
+
 			mx.Lock()
 			for addr, state := range states {
 				m.ServerState.WithLabelValues(addr).Set(state)
@@ -158,10 +158,18 @@ func main() {
 					dead++
 				}
 			}
+
+			for _, seqno := range seqnos {
+				if seqno > lastSeqno {
+					lastSeqno = seqno
+				}
+			}
+
 			for addr, seqno := range seqnos {
 				m.ServerLag.WithLabelValues(addr).Set(lastSeqno - seqno)
 			}
 			mx.Unlock()
+
 			m.ActiveServers.Set(float64(active))
 			log.Info().Int64("active", int64(active)).Int64("dead", int64(dead)).Msg("Servers")
 		}

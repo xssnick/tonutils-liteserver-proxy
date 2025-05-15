@@ -164,7 +164,7 @@ func (c *BlockCache) GetLibraries(ctx context.Context, hashes [][]byte) (*cell.D
 		if c.libsCache != nil {
 			lib, ok := c.libsCache.Get(string(hash))
 			if ok {
-				if err := libs.Set(cell.BeginCell().MustStoreSlice(hash, 256).EndCell(), lib.(*cell.Cell)); err != nil {
+				if err := libs.Set(cell.BeginCell().MustStoreSlice(hash, 256).EndCell(), cell.BeginCell().MustStoreRef(lib.(*cell.Cell)).EndCell()); err != nil {
 					return nil, false, err
 				}
 				continue
@@ -185,7 +185,7 @@ func (c *BlockCache) GetLibraries(ctx context.Context, hashes [][]byte) (*cell.D
 	for i, cl := range fetchedLibs {
 		if cl != nil {
 			c.libsCache.Add(string(toFetch[i]), cl)
-			if err = libs.Set(cell.BeginCell().MustStoreSlice(cl.Hash(), 256).EndCell(), cl); err != nil {
+			if err = libs.Set(cell.BeginCell().MustStoreSlice(cl.Hash(), 256).EndCell(), cell.BeginCell().MustStoreRef(cl).EndCell()); err != nil {
 				return nil, false, err
 			}
 		}
