@@ -375,7 +375,11 @@ func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.Server
 						if debugInfo != nil {
 							debugInfo["method"] = v.MethodID
 							debugInfo["mode"] = v.Mode
-							debugInfo["params"] = base64.URLEncoding.EncodeToString(v.Params.ToBOC())
+							if v.Params != nil {
+								debugInfo["params"] = base64.URLEncoding.EncodeToString(v.Params.ToBOC())
+							} else {
+								debugInfo["params"] = "empty"
+							}
 							debugInfo["addr"] = fmt.Sprint(v.Account.Workchain) + ":" + hex.EncodeToString(v.Account.ID)
 						}
 					case ton.GetState:
