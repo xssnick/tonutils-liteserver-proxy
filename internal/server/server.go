@@ -4,9 +4,12 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/kevinms/leakybucket-go"
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/xssnick/tonutils-go/address"
 	"github.com/xssnick/tonutils-go/adnl"
@@ -267,6 +270,11 @@ func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.Server
 			go func() {
 				var resp tl.Serializable
 
+				var debugInfo map[string]any
+				if log.Logger.GetLevel() == zerolog.DebugLevel {
+					debugInfo = map[string]any{}
+				}
+
 				tm := time.Now()
 				hitType := HitTypeBackend
 				gpType := GPTypeGeneral
@@ -344,6 +352,10 @@ func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.Server
 					case ton.GetAccountState:
 						resp, hitType = s.handleGetAccount(ctx, &v)
 						gpType = GPTypeGetAccount
+
+						if debugInfo != nil {
+							debugInfo["addr"] = fmt.Sprint(v.Account.Workchain) + ":" + hex.EncodeToString(v.Account.ID)
+						}
 					case ton.LookupBlock:
 						resp, hitType = s.handleLookupBlock(ctx, &v)
 						gpType = GPTypeLookupBlock
@@ -359,6 +371,13 @@ func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.Server
 						gpType = GPTypeListTransactions
 					case ton.RunSmcMethod:
 						gpType = GPTypeRunMethod
+
+						if debugInfo != nil {
+							debugInfo["method"] = v.MethodID
+							debugInfo["mode"] = v.Mode
+							debugInfo["params"] = base64.URLEncoding.EncodeToString(v.Params.ToBOC())
+							debugInfo["addr"] = fmt.Sprint(v.Account.Workchain) + ":" + hex.EncodeToString(v.Account.ID)
+						}
 					case ton.GetState:
 					case ton.GetAccountStatePruned:
 					case ton.GetShardInfo:
@@ -384,7 +403,9 @@ func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.Server
 
 					snc := time.Since(tm)
 					metrics.Global.Queries.WithLabelValues(lim.name, reflect.TypeOf(q.Data).String(), hitType).Observe(snc.Seconds())
-					log.Debug().Str("ip", sc.IP()).Type("request", q.Data).Type("response", resp).Dur("took", snc).Msg("query finished")
+					if debugInfo != nil {
+						log.Debug().Str("ip", sc.IP()).Type("request", q.Data).Fields(debugInfo).Type("response", resp).Dur("took", snc).Msg("query finished")
+					}
 				}()
 
 				gp := s.gpCache[gpType]
