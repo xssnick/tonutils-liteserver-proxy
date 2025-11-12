@@ -1,5 +1,3 @@
-//go:build noemu
-
 package emulate
 
 import (
@@ -10,9 +8,9 @@ import (
 )
 
 func RunGetMethod(params RunMethodParams, maxGas int64) (*RunResult, error) {
-	panic("emulator not compiled")
+	panic("emulator not implemented")
 }
 
 func PrepareC7(addr *address.Address, tm time.Time, seed []byte, balance *big.Int, cfg *cell.Dictionary, code *cell.Cell) ([]any, error) {
-	panic("emulator not compiled")
+	panic("emulator not implemented")
 }

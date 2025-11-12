@@ -15,11 +15,9 @@ import (
 	"github.com/xssnick/tonutils-go/adnl"
 	"github.com/xssnick/tonutils-go/liteclient"
 	"github.com/xssnick/tonutils-go/tl"
-	"github.com/xssnick/tonutils-go/tlb"
 	"github.com/xssnick/tonutils-go/ton"
 	"github.com/xssnick/tonutils-go/tvm/cell"
 	"github.com/xssnick/tonutils-liteserver-proxy/config"
-	"github.com/xssnick/tonutils-liteserver-proxy/internal/emulate"
 	"github.com/xssnick/tonutils-liteserver-proxy/metrics"
 	"hash/crc64"
 	"reflect"
@@ -476,12 +474,12 @@ func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.Server
 					}
 				}
 
-				if !s.onlyProxy && resp == nil && s.cache.MethodEmulationEnabled() {
+				/*if !s.onlyProxy && resp == nil && s.cache.MethodEmulationEnabled() {
 					// we have it here to cache calls, because they are heavy
 					if v, ok := q.Data.(ton.RunSmcMethod); ok {
 						resp, hitType = s.handleRunSmcMethod(ctx, &v)
 					}
-				}
+				}*/
 
 				if resp == nil {
 					log.Debug().Type("request", q.Data).Msg("direct proxy")
@@ -532,6 +530,7 @@ func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.Server
 	return fmt.Errorf("something unknown: %s", reflect.TypeOf(msg).String())
 }
 
+/*
 func (s *ProxyBalancer) handleRunSmcMethod(ctx context.Context, v *ton.RunSmcMethod) (tl.Serializable, string) {
 	block, cachedBlock, err := s.cache.CacheBlockIfNeeded(ctx, v.ID)
 	if err != nil {
@@ -691,10 +690,6 @@ func (s *ProxyBalancer) handleRunSmcMethod(ctx context.Context, v *ton.RunSmcMet
 			Msg("failed to emulate get method, sending to node")
 
 		return nil, HitTypeBackend
-		/*return ton.LSError{
-			Code: 500,
-			Text: "failed to emulate run method: " + err.Error(),
-		}, HitTypeFailedInternal*/
 	}
 	took := time.Since(etm)
 	metrics.Global.RunGetMethodEmulation.Observe(took.Seconds())
@@ -735,6 +730,7 @@ func (s *ProxyBalancer) handleRunSmcMethod(ctx context.Context, v *ton.RunSmcMet
 		Result:     res.Stack,
 	}, hit
 }
+*/
 
 func (s *ProxyBalancer) handleGetMasterchainInfoExt(ctx context.Context, v *ton.GetMasterchainInfoExt) (tl.Serializable, string) {
 	if v.Mode != 0 {
