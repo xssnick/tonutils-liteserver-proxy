@@ -134,3 +134,44 @@ func TestBackendRouterFallsBackToFastWithoutSeqnoSource(t *testing.T) {
 		t.Fatalf("expected fast backend, got %s", name)
 	}
 }
+
+func TestFindStorageBoundary(t *testing.T) {
+	oldestAvailable, firstUnavailable, err := findStorageBoundary(1000, func(seqno uint32) (bool, error) {
+		return seqno >= 321, nil
+	})
+	if err != nil {
+		t.Fatalf("findStorageBoundary returned error: %v", err)
+	}
+	if oldestAvailable != 321 {
+		t.Fatalf("expected oldest available 321, got %d", oldestAvailable)
+	}
+	if firstUnavailable != 320 {
+		t.Fatalf("expected first unavailable 320, got %d", firstUnavailable)
+	}
+}
+
+func TestFindStorageBoundaryWithFullHistory(t *testing.T) {
+	oldestAvailable, firstUnavailable, err := findStorageBoundary(1000, func(seqno uint32) (bool, error) {
+		return true, nil
+	})
+	if err != nil {
+		t.Fatalf("findStorageBoundary returned error: %v", err)
+	}
+	if oldestAvailable != 1 {
+		t.Fatalf("expected oldest available 1, got %d", oldestAvailable)
+	}
+	if firstUnavailable != 0 {
+		t.Fatalf("expected no unavailable seqno, got %d", firstUnavailable)
+	}
+}
+
+func TestEffectiveArchiveThreshold(t *testing.T) {
+	threshold := effectiveArchiveThreshold([]BackendStorageDepth{
+		{Name: "fast-a", RouteThreshold: 1500},
+		{Name: "fast-b", RouteThreshold: 900},
+		{Name: "fast-c", RouteThreshold: 0},
+	})
+	if threshold != 900 {
+		t.Fatalf("expected threshold 900, got %d", threshold)
+	}
+}

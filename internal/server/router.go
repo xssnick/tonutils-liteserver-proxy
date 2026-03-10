@@ -29,7 +29,7 @@ type BackendRouter struct {
 	seqnoSource MasterSeqnoSource
 }
 
-func NewBackendRouter(backends []config.BackendLiteserver, typ BalancerType, archiveThreshold uint32) (*BackendRouter, error) {
+func NewBackendRouter(backends []config.BackendLiteserver, typ BalancerType) (*BackendRouter, error) {
 	var fastBackends, archiveBackends []config.BackendLiteserver
 	for _, backend := range backends {
 		switch role := strings.ToLower(strings.TrimSpace(backend.Role)); role {
@@ -59,16 +59,9 @@ func NewBackendRouter(backends []config.BackendLiteserver, typ BalancerType, arc
 		}
 	}
 
-	if archive != nil && archiveThreshold > 0 {
-		log.Info().Uint32("threshold", archiveThreshold).Int("archive_backends", len(archiveBackends)).Msg("archive routing enabled")
-	} else if archive != nil {
-		log.Info().Msg("archive backends configured, but archive routing threshold is 0 so routing is disabled")
-	}
-
 	return &BackendRouter{
-		fast:             fast,
-		archive:          archive,
-		archiveThreshold: archiveThreshold,
+		fast:    fast,
+		archive: archive,
 	}, nil
 }
 
@@ -76,6 +69,18 @@ func (r *BackendRouter) SetSeqnoSource(src MasterSeqnoSource) {
 	r.mx.Lock()
 	r.seqnoSource = src
 	r.mx.Unlock()
+}
+
+func (r *BackendRouter) SetArchiveThreshold(threshold uint32) {
+	r.mx.Lock()
+	r.archiveThreshold = threshold
+	r.mx.Unlock()
+}
+
+func (r *BackendRouter) ArchiveThreshold() uint32 {
+	r.mx.RLock()
+	defer r.mx.RUnlock()
+	return r.archiveThreshold
 }
 
 func (r *BackendRouter) GetClient() ton.LiteClient {
@@ -104,16 +109,17 @@ func (r *BackendRouter) SelectClientByBlockShort(id *ton.BlockInfoShort) (ton.Li
 }
 
 func (r *BackendRouter) SelectClientBySeqno(seqno uint32) (ton.LiteClient, bool) {
-	if !r.shouldUseArchive(seqno) {
+	threshold := r.ArchiveThreshold()
+	if !r.shouldUseArchive(seqno, threshold) {
 		return r.fast.GetClient(), false
 	}
 
-	log.Debug().Uint32("seqno", seqno).Uint32("threshold", r.archiveThreshold).Msg("routing request to archive backend")
+	log.Debug().Uint32("seqno", seqno).Uint32("threshold", threshold).Msg("routing request to archive backend")
 	return r.archive.GetClient(), true
 }
 
-func (r *BackendRouter) shouldUseArchive(seqno uint32) bool {
-	if r.archive == nil || r.archiveThreshold == 0 {
+func (r *BackendRouter) shouldUseArchive(seqno uint32, threshold uint32) bool {
+	if r.archive == nil || threshold == 0 {
 		return false
 	}
 
@@ -122,7 +128,7 @@ func (r *BackendRouter) shouldUseArchive(seqno uint32) bool {
 		return false
 	}
 
-	return currentSeqno-seqno >= r.archiveThreshold
+	return currentSeqno-seqno >= threshold
 }
 
 func (r *BackendRouter) currentMasterSeqno() (uint32, bool) {

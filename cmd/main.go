@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/ed25519"
 	"encoding/base64"
 	"flag"
@@ -59,9 +60,13 @@ func main() {
 		log.Info().Int("i", i).Str("pub_key", base64.StdEncoding.EncodeToString(key.Public().(ed25519.PublicKey))).Msg("liteserver initialized")
 	}
 
-	router, err := server.NewBackendRouter(cfg.Backends, server.BalancerType(cfg.BalancerType), cfg.ArchiveBalanceThreshold)
+	router, err := server.NewBackendRouter(cfg.Backends, server.BalancerType(cfg.BalancerType))
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to init backend router")
+		return
+	}
+	if err = router.DetectArchiveThreshold(context.Background()); err != nil {
+		log.Fatal().Err(err).Msg("failed to detect fast backend storage depth")
 		return
 	}
 
@@ -69,7 +74,7 @@ func main() {
 	if !cfg.DisableEmulationAndCache {
 		cache = server.NewBlockCache(cfg.CacheConfig, router)
 		router.SetSeqnoSource(cache)
-	} else if cfg.ArchiveBalanceThreshold > 0 {
+	} else if router.ArchiveThreshold() > 0 {
 		router.SetSeqnoSource(server.NewMasterSeqnoTracker(router))
 		log.Info().Msg("started standalone master seqno tracker for archive routing")
 	}

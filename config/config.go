@@ -38,7 +38,6 @@ type Config struct {
 	MetricsAddr              string
 	MetricsNamespace         string
 	DisableEmulationAndCache bool
-	ArchiveBalanceThreshold  uint32
 	CacheConfig              CacheConfig
 	Clients                  []ClientConfig
 	Backends                 []BackendLiteserver
@@ -77,7 +76,6 @@ func LoadConfig(path string) (*Config, error) {
 			MetricsAddr:              "0.0.0.0:8058",
 			MetricsNamespace:         "basic",
 			DisableEmulationAndCache: false,
-			ArchiveBalanceThreshold:  100,
 			BalancerType:             "fail_over",
 			CacheConfig: CacheConfig{
 				DisableGetMethodsEmulation:     false,
