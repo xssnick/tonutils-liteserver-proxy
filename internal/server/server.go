@@ -89,8 +89,8 @@ type CacheWaiter struct {
 }
 
 type ProxyBalancer struct {
-	srv             *liteclient.Server
-	backendBalancer *BackendBalancer
+	srv           *liteclient.Server
+	backendRouter *BackendRouter
 
 	ips map[string]*ClientIPInfo
 
@@ -114,9 +114,9 @@ type KeyConfig struct {
 	limiterPerKey *leakybucket.LeakyBucket
 }
 
-func NewProxyBalancer(configs []config.ClientConfig, backendBalancer *BackendBalancer, cache Cache, onlyProxy bool, maxConnectionsPerIP int, maxKeepAlive time.Duration, gpCacheSizes map[string]int) *ProxyBalancer {
+func NewProxyBalancer(configs []config.ClientConfig, backendRouter *BackendRouter, cache Cache, onlyProxy bool, maxConnectionsPerIP int, maxKeepAlive time.Duration, gpCacheSizes map[string]int) *ProxyBalancer {
 	s := &ProxyBalancer{
-		backendBalancer:     backendBalancer,
+		backendRouter:       backendRouter,
 		configs:             map[string]*KeyConfig{},
 		cache:               cache,
 		onlyProxy:           onlyProxy,
@@ -231,6 +231,23 @@ func (s *ProxyBalancer) Listen(addr string) error {
 
 var crcTable = crc64.MakeTable(crc64.ECMA)
 
+const maxWaitMasterchainTimeout = 30 * time.Second
+
+func normalizeWaitMasterchainTimeout(timeoutMS int32, maxKeepAlive time.Duration) time.Duration {
+	if timeoutMS <= 0 {
+		return 0
+	}
+
+	timeout := time.Duration(timeoutMS) * time.Millisecond
+	if timeout > maxWaitMasterchainTimeout {
+		timeout = maxWaitMasterchainTimeout
+	}
+	if maxKeepAlive > 0 && timeout > maxKeepAlive {
+		timeout = maxKeepAlive
+	}
+	return timeout
+}
+
 func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.ServerClient, msg tl.Serializable) error {
 	lim := s.configs[string(sc.ServerKey())]
 	if lim == nil {
@@ -301,7 +318,8 @@ func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.Server
 						}
 
 						tmWait := time.Now()
-						if err := s.cache.WaitMasterBlock(ctx, uint32(wt.Seqno), time.Duration(wt.Timeout)*time.Second); err != nil {
+						waitTimeout := normalizeWaitMasterchainTimeout(wt.Timeout, s.maxKeepAlive)
+						if err := s.cache.WaitMasterBlock(ctx, uint32(wt.Seqno), waitTimeout); err != nil {
 							if ls, ok := err.(ton.LSError); ok {
 								_ = sc.Send(adnl.MessageAnswer{ID: m.ID, Data: ls})
 								return
@@ -483,11 +501,15 @@ func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.Server
 
 				if resp == nil {
 					log.Debug().Type("request", q.Data).Msg("direct proxy")
-					// we expect to have only fast nodes, so timeout is short
-					ctx, cancel := context.WithTimeout(ctx, 7*time.Second)
+					client, useArchive := s.backendRouter.SelectClientForPayload(q.Data)
+					timeout := 7 * time.Second
+					if useArchive {
+						timeout = 20 * time.Second
+					}
+					ctx, cancel := context.WithTimeout(ctx, timeout)
 
 					lsTm := time.Now()
-					err := s.backendBalancer.GetClient().QueryLiteserver(ctx, q.Data, &resp)
+					err := client.QueryLiteserver(ctx, q.Data, &resp)
 					cancel()
 					if err != nil {
 						if strings.HasSuffix(err.Error(), "context canceled") {

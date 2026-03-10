@@ -59,15 +59,19 @@ func main() {
 		log.Info().Int("i", i).Str("pub_key", base64.StdEncoding.EncodeToString(key.Public().(ed25519.PublicKey))).Msg("liteserver initialized")
 	}
 
-	blc, err := server.NewBackendBalancer(cfg.Backends, server.BalancerType(cfg.BalancerType))
+	router, err := server.NewBackendRouter(cfg.Backends, server.BalancerType(cfg.BalancerType), cfg.ArchiveBalanceThreshold)
 	if err != nil {
-		log.Fatal().Err(err).Msg("failed to init backend balancer")
+		log.Fatal().Err(err).Msg("failed to init backend router")
 		return
 	}
 
 	var cache *server.BlockCache
 	if !cfg.DisableEmulationAndCache {
-		cache = server.NewBlockCache(cfg.CacheConfig, blc)
+		cache = server.NewBlockCache(cfg.CacheConfig, router)
+		router.SetSeqnoSource(cache)
+	} else if cfg.ArchiveBalanceThreshold > 0 {
+		router.SetSeqnoSource(server.NewMasterSeqnoTracker(router))
+		log.Info().Msg("started standalone master seqno tracker for archive routing")
 	}
 
 	go func() {
@@ -78,7 +82,7 @@ func main() {
 	}()
 
 	log.Info().Str("addr", cfg.ListenAddr).Msg("listening tcp")
-	proxy := server.NewProxyBalancer(cfg.Clients, blc, cache,
+	proxy := server.NewProxyBalancer(cfg.Clients, router, cache,
 		cfg.DisableEmulationAndCache, int(cfg.MaxConnectionsPerIP), time.Duration(cfg.MaxKeepAliveSeconds)*time.Second,
 		map[string]int{
 			"general":           int(cfg.ResponseGeneralCacheSize) / 2,

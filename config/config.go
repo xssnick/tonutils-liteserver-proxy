@@ -14,6 +14,7 @@ type BackendLiteserver struct {
 	Name string
 	Addr string
 	Key  []byte
+	Role string
 }
 
 type ClientConfig struct {
@@ -37,6 +38,7 @@ type Config struct {
 	MetricsAddr              string
 	MetricsNamespace         string
 	DisableEmulationAndCache bool
+	ArchiveBalanceThreshold  uint32
 	CacheConfig              CacheConfig
 	Clients                  []ClientConfig
 	Backends                 []BackendLiteserver
@@ -55,7 +57,7 @@ func LoadConfig(path string) (*Config, error) {
 	dir := filepath.Dir(path)
 	if _, err = os.Stat(dir); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			err = os.MkdirAll(dir, os.ModePerm)
+			err = os.MkdirAll(dir, 0700)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("failed to check directory: %w", err)
@@ -75,6 +77,7 @@ func LoadConfig(path string) (*Config, error) {
 			MetricsAddr:              "0.0.0.0:8058",
 			MetricsNamespace:         "basic",
 			DisableEmulationAndCache: false,
+			ArchiveBalanceThreshold:  100,
 			BalancerType:             "fail_over",
 			CacheConfig: CacheConfig{
 				DisableGetMethodsEmulation:     false,
@@ -132,9 +135,16 @@ func SaveConfig(cfg *Config, path string) error {
 		return err
 	}
 
-	err = os.WriteFile(path, data, 0766)
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
 		return err
 	}
-	return nil
+	if _, err = f.Write(data); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err = f.Close(); err != nil {
+		return err
+	}
+	return os.Chmod(path, 0600)
 }

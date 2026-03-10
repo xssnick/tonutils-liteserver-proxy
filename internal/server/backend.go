@@ -42,6 +42,10 @@ type BackendBalancer struct {
 }
 
 func NewBackendBalancer(backends []config.BackendLiteserver, typ BalancerType) (*BackendBalancer, error) {
+	if err := validateBalancerType(typ); err != nil {
+		return nil, err
+	}
+
 	var b BackendBalancer
 	b.balancerType = typ
 	for _, backend := range backends {
@@ -64,16 +68,26 @@ func NewBackendBalancer(backends []config.BackendLiteserver, typ BalancerType) (
 	return &b, nil
 }
 
+func validateBalancerType(typ BalancerType) error {
+	switch typ {
+	case BalancerTypeRoundRobin, BalancerTypeFailOver:
+		return nil
+	default:
+		return fmt.Errorf("unknown balancer type: %s", typ)
+	}
+}
+
 func (b *BackendBalancer) GetClient() ton.LiteClient {
 	switch b.balancerType {
 	case BalancerTypeFailOver:
-		for _, backend := range b.backends {
+		for i := range b.backends {
+			backend := &b.backends[i]
 			if atomic.LoadUint64(&backend.failsStreak) > 10 &&
 				atomic.LoadInt64(&backend.lastRequest)-atomic.LoadInt64(&backend.lastSuccess) > 5 {
 				// failed node
 				continue
 			}
-			return &backend
+			return backend
 		}
 
 		// all nodes failed over switch to round-robin, and maybe it will become alive
@@ -104,7 +118,7 @@ func (b *Backend) QueryLiteserver(ctx context.Context, payload tl.Serializable, 
 			atomic.AddUint64(&b.failsStreak, 1)
 			status = "failed"
 			log.Debug().Err(err).Str("name", b.Name).Msg("backend query failed")
-		} else if ls, ok := result.(ton.LSError); ok {
+		} else if ls, ok := unwrapLSError(result); ok {
 			atomic.AddUint64(&b.failsStreak, 1)
 			status = "ls_error"
 			log.Debug().Str("name", b.Name).Str("reason", ls.Text).Int32("code", ls.Code).Msg("backend query ls error")
@@ -116,7 +130,7 @@ func (b *Backend) QueryLiteserver(ctx context.Context, payload tl.Serializable, 
 		metrics.Global.BackendQueries.WithLabelValues(b.Name, reflect.TypeOf(payload).String(), status).Observe(time.Since(tm).Seconds())
 	}()
 
-	if dl, ok := ctx.Deadline(); !ok || dl.After(time.Now().Add(10*time.Second)) {
+	if _, ok := ctx.Deadline(); !ok {
 		var cancel func()
 		ctx, cancel = context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
@@ -142,4 +156,20 @@ func (b *Backend) StickyNodeID(ctx context.Context) uint32 {
 
 func (b *Backend) StickyContextNextNodeBalanced(ctx context.Context) (context.Context, error) {
 	return b.Client.StickyContextNextNodeBalanced(ctx)
+}
+
+func unwrapLSError(result tl.Serializable) (ton.LSError, bool) {
+	switch v := result.(type) {
+	case ton.LSError:
+		return v, true
+	case *ton.LSError:
+		if v != nil {
+			return *v, true
+		}
+	case *tl.Serializable:
+		if v != nil && *v != nil {
+			return unwrapLSError(*v)
+		}
+	}
+	return ton.LSError{}, false
 }

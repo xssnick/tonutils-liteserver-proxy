@@ -63,7 +63,7 @@ type ShardInfo struct {
 type BlockCache struct {
 	config config.CacheConfig
 
-	balancer  *BackendBalancer
+	router    *BackendRouter
 	libsCache *lru.ARCCache
 
 	lastBlock *ton.BlockIDExt
@@ -78,10 +78,10 @@ type BlockCache struct {
 	mx       sync.RWMutex
 }
 
-func NewBlockCache(config config.CacheConfig, balancer *BackendBalancer) *BlockCache {
+func NewBlockCache(config config.CacheConfig, router *BackendRouter) *BlockCache {
 	b := &BlockCache{
 		config:       config,
-		balancer:     balancer,
+		router:       router,
 		masterBlocks: map[uint32]*MasterBlock{},
 		shards:       map[string]*ShardInfo{},
 	}
@@ -103,7 +103,7 @@ func NewBlockCache(config config.CacheConfig, balancer *BackendBalancer) *BlockC
 		var waitSeqno, streak uint32
 		for {
 			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-			inf, err := getMasterchainInfo(ctx, b.balancer.GetClient(), waitSeqno)
+			inf, err := getMasterchainInfo(ctx, b.router.GetClient(), waitSeqno)
 			cancel()
 			if err != nil {
 				if streak > 3 {
@@ -177,14 +177,14 @@ func (c *BlockCache) GetLibraries(ctx context.Context, hashes [][]byte) (*cell.D
 		return libs, true, nil
 	}
 
-	fetchedLibs, err := getLibraries(ctx, c.balancer.GetClient(), toFetch...)
+	fetchedLibs, err := getLibraries(ctx, c.router.GetClient(), toFetch...)
 	if err != nil {
 		return nil, false, err
 	}
 
 	for i, cl := range fetchedLibs {
 		if cl != nil {
-			c.libsCache.Add(string(toFetch[i]), cl)
+			c.storeLibrary(toFetch[i], cl)
 			if err = libs.Set(cell.BeginCell().MustStoreSlice(cl.Hash(), 256).EndCell(), cell.BeginCell().MustStoreRef(cl).EndCell()); err != nil {
 				return nil, false, err
 			}
@@ -192,6 +192,13 @@ func (c *BlockCache) GetLibraries(ctx context.Context, hashes [][]byte) (*cell.D
 	}
 
 	return libs, false, nil
+}
+
+func (c *BlockCache) storeLibrary(hash []byte, cl *cell.Cell) {
+	if c.libsCache == nil {
+		return
+	}
+	c.libsCache.Add(string(hash), cl)
 }
 
 func (c *BlockCache) GetMasterBlock(ctx context.Context, id *ton.BlockIDExt, skipChecks bool) (*MasterBlock, bool, error) {
@@ -208,7 +215,7 @@ func (c *BlockCache) GetMasterBlock(ctx context.Context, id *ton.BlockIDExt, ski
 	c.mx.RUnlock()
 
 	if !skipChecks {
-		if lastSeqno > 0 && id.SeqNo < lastSeqno-c.config.MaxMasterBlockSeqnoDiffToCache {
+		if lastSeqno > 0 && !isWithinSeqnoDiff(lastSeqno, id.SeqNo, c.config.MaxMasterBlockSeqnoDiffToCache) {
 			return nil, false, ton.LSError{
 				Code: 410,
 				Text: "too old master info requested",
@@ -247,7 +254,8 @@ func (c *BlockCache) GetMasterBlock(ctx context.Context, id *ton.BlockIDExt, ski
 		return b, true, nil
 	}
 
-	blockRaw, blockCell, err := getBlock(ctx, c.balancer.GetClient(), id)
+	client, _ := c.router.SelectClientByBlockID(id)
+	blockRaw, blockCell, err := getBlock(ctx, client, id)
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to get block data: %w", err)
 	}
@@ -288,7 +296,8 @@ func (c *BlockCache) GetMasterBlock(ctx context.Context, id *ton.BlockIDExt, ski
 
 		if cfg == nil {
 			// fetch config directly, because we don't know current
-			cfg, err = getBlockchainConfig(ctx, c.balancer.GetClient(), id)
+			client, _ := c.router.SelectClientByBlockID(id)
+			cfg, err = getBlockchainConfig(ctx, client, id)
 			if err != nil {
 				return nil, false, fmt.Errorf("failed to get config: %w", err)
 			}
@@ -401,6 +410,16 @@ func (c *BlockCache) GetLastMasterBlock(ctx context.Context) (*MasterBlock, bool
 	return c.GetMasterBlock(ctx, lb, false)
 }
 
+func (c *BlockCache) CurrentMasterSeqno() (uint32, bool) {
+	c.mx.RLock()
+	defer c.mx.RUnlock()
+
+	if c.lastBlock == nil {
+		return 0, false
+	}
+	return c.lastBlock.SeqNo, true
+}
+
 func (c *BlockCache) WaitMasterBlock(ctx context.Context, seqno uint32, timeout time.Duration) error {
 	c.mx.RLock()
 	already := c.lastBlock != nil && seqno <= c.lastBlock.SeqNo
@@ -468,7 +487,8 @@ func (c *BlockCache) GetAccountState(ctx context.Context, id *ton.BlockIDExt, ad
 	}
 
 	if block == nil {
-		account, err := getAccount(ctx, c.balancer.GetClient(), id, addr)
+		client, _ := c.router.SelectClientByBlockID(id)
+		account, err := getAccount(ctx, client, id, addr)
 		if err != nil {
 			return nil, false, err
 		}
@@ -497,7 +517,8 @@ func (c *BlockCache) GetAccountStateInBlock(ctx context.Context, block *Block, a
 		}
 	}
 
-	account, err := getAccount(ctx, c.balancer.GetClient(), block.ID, addr)
+	client, _ := c.router.SelectClientByBlockID(block.ID)
+	account, err := getAccount(ctx, client, block.ID, addr)
 	if err != nil {
 		return nil, false, err
 	}
@@ -579,7 +600,7 @@ func (c *BlockCache) CacheBlockIfNeeded(ctx context.Context, id *ton.BlockIDExt)
 		if si != nil {
 			b = si.shardBlocks[id.SeqNo]
 		}
-		needCache := si != nil && id.SeqNo >= si.lastBlock.SeqNo-c.config.MaxShardBlockSeqnoDiffToCache
+		needCache := si != nil && isWithinSeqnoDiff(si.lastBlock.SeqNo, id.SeqNo, c.config.MaxShardBlockSeqnoDiffToCache)
 		c.mx.RUnlock()
 
 		if si == nil {
@@ -630,7 +651,8 @@ func (c *BlockCache) CacheBlockIfNeeded(ctx context.Context, id *ton.BlockIDExt)
 			defer b.mx.Unlock()
 
 			if b.Data == nil {
-				blockRaw, blk, err := getBlock(ctx, c.balancer.GetClient(), id)
+				client, _ := c.router.SelectClientByBlockID(id)
+				blockRaw, blk, err := getBlock(ctx, client, id)
 				if err != nil {
 					return nil, false, err
 				}
@@ -674,7 +696,7 @@ func (c *BlockCache) CacheBlockIfNeeded(ctx context.Context, id *ton.BlockIDExt)
 	} else {
 		c.mx.RLock()
 		b := c.masterBlocks[id.SeqNo]
-		needCache := c.lastBlock != nil && id.SeqNo >= c.lastBlock.SeqNo-c.config.MaxMasterBlockSeqnoDiffToCache
+		needCache := c.lastBlock != nil && isWithinSeqnoDiff(c.lastBlock.SeqNo, id.SeqNo, c.config.MaxMasterBlockSeqnoDiffToCache)
 		c.mx.RUnlock()
 
 		if b != nil && b.Block.ID != nil {
@@ -842,6 +864,13 @@ func getMasterchainInfo(ctx context.Context, client ton.LiteClient, seqno uint32
 
 func getShardKey(wc int32, shard int64) string {
 	return fmt.Sprint(wc) + ":" + fmt.Sprint(shard)
+}
+
+func isWithinSeqnoDiff(current uint32, target uint32, maxDiff uint32) bool {
+	if current <= target {
+		return true
+	}
+	return current-target <= maxDiff
 }
 
 func getBlock(ctx context.Context, client ton.LiteClient, block *ton.BlockIDExt) ([]byte, *cell.Cell, error) {
