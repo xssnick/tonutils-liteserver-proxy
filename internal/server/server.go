@@ -360,6 +360,7 @@ func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.Server
 						resp, hitType = s.handleGetMasterchainInfo(ctx)
 					case ton.GetLibraries:
 						resp, hitType = s.handleGetLibraries(ctx, &v)
+					case GetLibrariesWithProof:
 					case ton.GetOneTransaction:
 						resp, hitType = s.handleGetTransaction(ctx, &v)
 						gpType = GPTypeGetTransaction
@@ -871,9 +872,18 @@ func (s *ProxyBalancer) handleGetLibraries(ctx context.Context, v *ton.GetLibrar
 
 	var libsRes []*ton.LibraryEntry
 	for _, kv := range all {
+		data, err := loadLibraryDictValueCell(kv.Value)
+		if err != nil {
+			log.Warn().Err(err).Type("request", v).Msg("failed to decode library value")
+			return ton.LSError{
+				Code: 500,
+				Text: "failed to decode library value",
+			}, HitTypeFailedInternal
+		}
+
 		libsRes = append(libsRes, &ton.LibraryEntry{
 			Hash: kv.Key.MustLoadSlice(256),
-			Data: kv.Value.MustToCell(),
+			Data: data,
 		})
 	}
 

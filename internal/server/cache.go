@@ -154,6 +154,8 @@ func NewBlockCache(config config.CacheConfig, router *BackendRouter) *BlockCache
 }
 
 func (c *BlockCache) GetLibraries(ctx context.Context, hashes [][]byte) (*cell.Dictionary, bool, error) {
+	hashes = normalizeLibraryListForLookup(hashes)
+
 	libs := cell.NewDict(256)
 	if len(hashes) == 0 {
 		return libs, true, nil
@@ -185,7 +187,7 @@ func (c *BlockCache) GetLibraries(ctx context.Context, hashes [][]byte) (*cell.D
 	for i, cl := range fetchedLibs {
 		if cl != nil {
 			c.storeLibrary(toFetch[i], cl)
-			if err = libs.Set(cell.BeginCell().MustStoreSlice(cl.Hash(), 256).EndCell(), cell.BeginCell().MustStoreRef(cl).EndCell()); err != nil {
+			if err = libs.Set(cell.BeginCell().MustStoreSlice(toFetch[i], 256).EndCell(), cell.BeginCell().MustStoreRef(cl).EndCell()); err != nil {
 				return nil, false, err
 			}
 		}
@@ -913,10 +915,12 @@ func getLibraries(ctx context.Context, client ton.LiteClient, hashes ...[]byte) 
 
 		for i := 0; i < len(hashes); i++ {
 			for _, e := range t.Result {
-				// we are calculating hash by ourselves
-				// to make sure that LS is not cheating
-				if bytes.Equal(hashes[i], e.Data.Hash()) {
-					libList[i] = e.Data
+				// Calculate hashes by ourselves to make sure that LS is not cheating.
+				// Some LS responses wrap the actual library root into an empty root cell,
+				// so we only unwrap that canonical wrapper form before matching.
+				if lib := unwrapLibraryResultCell(e.Data, hashes[i]); lib != nil {
+					libList[i] = lib
+					break
 				}
 			}
 		}
