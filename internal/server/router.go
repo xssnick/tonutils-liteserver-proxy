@@ -142,74 +142,49 @@ func (r *BackendRouter) currentMasterSeqno() (uint32, bool) {
 }
 
 func payloadMinSeqno(payload tl.Serializable) (uint32, bool) {
+	// TL parsing into interface values stores concrete structs, not pointers.
 	switch v := payload.(type) {
 	case ton.GetBlockData:
 		return seqnoFromBlockID(v.ID)
-	case *ton.GetBlockData:
-		return seqnoFromBlockID(v.ID)
 	case ton.GetAccountState:
-		return seqnoFromBlockID(v.ID)
-	case *ton.GetAccountState:
 		return seqnoFromBlockID(v.ID)
 	case ton.GetAccountStatePruned:
 		return seqnoFromBlockID(v.ID)
-	case *ton.GetAccountStatePruned:
-		return seqnoFromBlockID(v.ID)
 	case ton.GetOneTransaction:
-		return seqnoFromBlockID(v.ID)
-	case *ton.GetOneTransaction:
 		return seqnoFromBlockID(v.ID)
 	case ton.GetConfigAll:
 		return seqnoFromBlockID(v.BlockID)
-	case *ton.GetConfigAll:
-		return seqnoFromBlockID(v.BlockID)
 	case ton.GetConfigParams:
-		return seqnoFromBlockID(v.BlockID)
-	case *ton.GetConfigParams:
 		return seqnoFromBlockID(v.BlockID)
 	case ton.GetState:
 		return seqnoFromBlockID(v.ID)
-	case *ton.GetState:
-		return seqnoFromBlockID(v.ID)
 	case ton.GetShardBlockProof:
-		return seqnoFromBlockID(v.ID)
-	case *ton.GetShardBlockProof:
 		return seqnoFromBlockID(v.ID)
 	case ton.GetShardInfo:
 		return seqnoFromBlockID(v.ID)
-	case *ton.GetShardInfo:
-		return seqnoFromBlockID(v.ID)
 	case ton.GetBlockHeader:
-		return seqnoFromBlockID(v.ID)
-	case *ton.GetBlockHeader:
 		return seqnoFromBlockID(v.ID)
 	case ton.GetAllShardsInfo:
 		return seqnoFromBlockID(v.ID)
-	case *ton.GetAllShardsInfo:
-		return seqnoFromBlockID(v.ID)
 	case ton.ListBlockTransactions:
-		return seqnoFromBlockID(v.ID)
-	case *ton.ListBlockTransactions:
 		return seqnoFromBlockID(v.ID)
 	case ton.ListBlockTransactionsExt:
 		return seqnoFromBlockID(v.ID)
-	case *ton.ListBlockTransactionsExt:
-		return seqnoFromBlockID(v.ID)
 	case ton.RunSmcMethod:
-		return seqnoFromBlockID(v.ID)
-	case *ton.RunSmcMethod:
 		return seqnoFromBlockID(v.ID)
 	case ton.LookupBlock:
 		return seqnoFromBlockShort(v.ID)
-	case *ton.LookupBlock:
-		return seqnoFromBlockShort(v.ID)
 	case ton.GetBlockProof:
 		return minKnownSeqno(v.KnownBlock, v.TargetBlock)
-	case *ton.GetBlockProof:
-		return minKnownSeqno(v.KnownBlock, v.TargetBlock)
+	case ton.GetLibrariesWithProof:
+		return seqnoFromBlockID(v.ID)
+	case ton.GetBlockOutMsgQueueSize:
+		return seqnoFromBlockID(v.ID)
+	case ton.GetDispatchQueueInfo:
+		return seqnoFromBlockID(v.ID)
+	case ton.GetDispatchQueueMessages:
+		return seqnoFromBlockID(v.ID)
 	case ton.GetTransactions:
-		return 0, false
-	case *ton.GetTransactions:
 		return 0, false
 	default:
 		return 0, false

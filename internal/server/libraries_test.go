@@ -122,20 +122,20 @@ func TestUnwrapLibraryResultCell(t *testing.T) {
 	library := cell.BeginCell().MustStoreUInt(0xFF00F4A4, 32).EndCell()
 	wrapped := cell.BeginCell().MustStoreRef(library).EndCell()
 
-	if got := unwrapLibraryResultCell(library, library.Hash()); got != library {
+	if got := unwrapLibraryResultCell(library.ToBOC(), library.Hash()); got == nil || !bytes.Equal(got.Hash(), library.Hash()) {
 		t.Fatalf("expected direct library cell to be returned")
 	}
 
-	if got := unwrapLibraryResultCell(wrapped, library.Hash()); got != library {
+	if got := unwrapLibraryResultCell(wrapped.ToBOC(), library.Hash()); got == nil || !bytes.Equal(got.Hash(), library.Hash()) {
 		t.Fatalf("expected wrapped library cell to be unwrapped")
 	}
 
-	if got := unwrapLibraryResultCell(wrapped, wrapped.Hash()); got != wrapped {
+	if got := unwrapLibraryResultCell(wrapped.ToBOC(), wrapped.Hash()); got == nil || !bytes.Equal(got.Hash(), wrapped.Hash()) {
 		t.Fatalf("expected wrapper hash to still resolve to wrapper")
 	}
 
 	nonCanonical := cell.BeginCell().MustStoreUInt(1, 1).MustStoreRef(library).EndCell()
-	if got := unwrapLibraryResultCell(nonCanonical, library.Hash()); got != nil {
+	if got := unwrapLibraryResultCell(nonCanonical.ToBOC(), library.Hash()); got != nil {
 		t.Fatalf("expected non-canonical wrapper not to be unwrapped")
 	}
 }
@@ -150,7 +150,7 @@ func TestGetLibrariesUnwrapsEmptyRootWrapper(t *testing.T) {
 			Result: []*ton.LibraryEntry{
 				{
 					Hash: library.Hash(),
-					Data: wrapped,
+					Data: wrapped.ToBOC(),
 				},
 			},
 		},
@@ -262,16 +262,20 @@ func TestHandleGetLibrariesReturnsRootCellInsteadOfWrapper(t *testing.T) {
 	if !bytes.Equal(result.Result[0].Hash, library.Hash()) {
 		t.Fatalf("unexpected library hash in response")
 	}
-	if !bytes.Equal(result.Result[0].Data.Hash(), library.Hash()) {
+	data, err := cell.FromBOC(result.Result[0].Data)
+	if err != nil {
+		t.Fatalf("failed to decode response library: %v", err)
+	}
+	if !bytes.Equal(data.Hash(), library.Hash()) {
 		t.Fatalf("expected response library root hash to match original library")
 	}
-	if result.Result[0].Data.BitsSize() == 0 && result.Result[0].Data.RefsNum() == 1 {
+	if data.BitsSize() == 0 && data.RefsNum() == 1 {
 		t.Fatalf("expected library root, got wrapper cell")
 	}
 }
 
 func TestLibrariesWithProofTLCompatibility(t *testing.T) {
-	req := GetLibrariesWithProof{
+	req := ton.GetLibrariesWithProof{
 		ID: &ton.BlockIDExt{
 			Workchain: -1,
 			Shard:     -9223372036854775808,
@@ -292,7 +296,7 @@ func TestLibrariesWithProofTLCompatibility(t *testing.T) {
 	if _, err = tl.Parse(&parsedReq, reqData, true); err != nil {
 		t.Fatalf("failed to parse request: %v", err)
 	}
-	gotReq, ok := parsedReq.(GetLibrariesWithProof)
+	gotReq, ok := parsedReq.(ton.GetLibrariesWithProof)
 	if !ok {
 		t.Fatalf("unexpected parsed request type: %T", parsedReq)
 	}
@@ -301,15 +305,15 @@ func TestLibrariesWithProofTLCompatibility(t *testing.T) {
 		t.Fatalf("request roundtrip mismatch")
 	}
 
-	resp := LibraryResultWithProof{
+	resp := ton.LibraryResultWithProof{
 		ID:   req.ID.Copy(),
 		Mode: req.Mode,
 		Result: []*ton.LibraryEntry{{
 			Hash: req.LibraryList[0],
-			Data: cell.BeginCell().MustStoreUInt(7, 3).EndCell(),
+			Data: cell.BeginCell().MustStoreUInt(7, 3).EndCell().ToBOC(),
 		}},
-		StateProof: cell.BeginCell().MustStoreUInt(1, 1).EndCell(),
-		DataProof:  cell.BeginCell().MustStoreUInt(2, 2).EndCell(),
+		StateProof: cell.BeginCell().MustStoreUInt(1, 1).EndCell().ToBOC(),
+		DataProof:  cell.BeginCell().MustStoreUInt(2, 2).EndCell().ToBOC(),
 	}
 
 	respData, err := tl.Serialize(resp, true)
@@ -321,7 +325,7 @@ func TestLibrariesWithProofTLCompatibility(t *testing.T) {
 	if _, err = tl.Parse(&parsedResp, respData, true); err != nil {
 		t.Fatalf("failed to parse response: %v", err)
 	}
-	gotResp, ok := parsedResp.(LibraryResultWithProof)
+	gotResp, ok := parsedResp.(ton.LibraryResultWithProof)
 	if !ok {
 		t.Fatalf("unexpected parsed response type: %T", parsedResp)
 	}

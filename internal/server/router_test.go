@@ -111,6 +111,60 @@ func TestBackendRouterUsesOldestProofSeqno(t *testing.T) {
 	}
 }
 
+func TestBackendRouterRoutesLibrariesWithProofByBlockSeqno(t *testing.T) {
+	router := testRouter(100, 250, true)
+
+	client, useArchive := router.SelectClientForPayload(ton.GetLibrariesWithProof{
+		ID: &ton.BlockIDExt{SeqNo: 100},
+	})
+	if !useArchive {
+		t.Fatalf("expected archive route")
+	}
+	if name := selectedBackendName(t, client); name != "archive" {
+		t.Fatalf("expected archive backend, got %s", name)
+	}
+}
+
+func TestBackendRouterRoutesQueueRequestsByBlockSeqno(t *testing.T) {
+	router := testRouter(100, 250, true)
+
+	tests := []struct {
+		name    string
+		payload any
+	}{
+		{
+			name: "block out msg queue size",
+			payload: ton.GetBlockOutMsgQueueSize{
+				ID: &ton.BlockIDExt{SeqNo: 100},
+			},
+		},
+		{
+			name: "dispatch queue info",
+			payload: ton.GetDispatchQueueInfo{
+				ID: &ton.BlockIDExt{SeqNo: 100},
+			},
+		},
+		{
+			name: "dispatch queue messages",
+			payload: ton.GetDispatchQueueMessages{
+				ID: &ton.BlockIDExt{SeqNo: 100},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client, useArchive := router.SelectClientForPayload(tt.payload)
+			if !useArchive {
+				t.Fatalf("expected archive route")
+			}
+			if name := selectedBackendName(t, client); name != "archive" {
+				t.Fatalf("expected archive backend, got %s", name)
+			}
+		})
+	}
+}
+
 func TestBackendRouterFallsBackToFastWithoutSeqnoSource(t *testing.T) {
 	router := &BackendRouter{
 		fast: &BackendBalancer{
@@ -152,6 +206,26 @@ func TestFindStorageBoundary(t *testing.T) {
 
 func TestFindStorageBoundaryWithFullHistory(t *testing.T) {
 	oldestAvailable, firstUnavailable, err := findStorageBoundary(1000, func(seqno uint32) (bool, error) {
+		return true, nil
+	})
+	if err != nil {
+		t.Fatalf("findStorageBoundary returned error: %v", err)
+	}
+	if oldestAvailable != 1 {
+		t.Fatalf("expected oldest available 1, got %d", oldestAvailable)
+	}
+	if firstUnavailable != 0 {
+		t.Fatalf("expected no unavailable seqno, got %d", firstUnavailable)
+	}
+}
+
+func TestFindStorageBoundaryWithFullHistoryNearMaxUint32(t *testing.T) {
+	var calls int
+	oldestAvailable, firstUnavailable, err := findStorageBoundary(^uint32(0), func(seqno uint32) (bool, error) {
+		calls++
+		if calls > 100 {
+			t.Fatalf("findStorageBoundary did not converge")
+		}
 		return true, nil
 	})
 	if err != nil {

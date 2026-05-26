@@ -263,11 +263,14 @@ func (c *BlockCache) GetMasterBlock(ctx context.Context, id *ton.BlockIDExt, ski
 	}
 
 	var block tlb.Block
-	if err = tlb.LoadFromCell(&block, blockCell.BeginParse()); err != nil {
+	if err = tlb.Parse(&block, blockCell); err != nil {
 		return nil, false, fmt.Errorf("failed to parse block data: %w", err)
 	}
 
-	sh := block.StateUpdate.BeginParse()
+	sh, err := block.StateUpdate.BeginParse()
+	if err != nil {
+		return nil, false, fmt.Errorf("corrpted state update: %w", err)
+	}
 	if _, err = sh.LoadSlice(8 + 256); err != nil {
 		return nil, false, fmt.Errorf("corrpted state update first bits: %w", err)
 	}
@@ -307,7 +310,11 @@ func (c *BlockCache) GetMasterBlock(ctx context.Context, id *ton.BlockIDExt, ski
 	}
 
 	var shardAccounts tlb.ShardAccountBlocks
-	if err = tlb.LoadFromCellAsProof(&shardAccounts, block.Extra.ShardAccountBlocks.BeginParse()); err != nil {
+	shardAccountsSlice, err := block.Extra.ShardAccountBlocks.BeginParse()
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to parse shard accounts from block: %w", err)
+	}
+	if err = tlb.LoadFromCellAsProof(&shardAccounts, shardAccountsSlice); err != nil {
 		return nil, false, fmt.Errorf("failed to load shard accounts from block: %w", err)
 	}
 
@@ -470,7 +477,15 @@ func getBlockchainConfig(ctx context.Context, client ton.LiteClient, block *ton.
 
 	switch t := resp.(type) {
 	case ton.ConfigAll:
-		stateExtra, err := ton.CheckShardMcStateExtraProof(block, []*cell.Cell{t.StateProof, t.ConfigProof})
+		stateProof, err := cell.FromBOC(t.StateProof)
+		if err != nil {
+			return nil, fmt.Errorf("incorrect state proof: %w", err)
+		}
+		configProof, err := cell.FromBOC(t.ConfigProof)
+		if err != nil {
+			return nil, fmt.Errorf("incorrect config proof: %w", err)
+		}
+		stateExtra, err := ton.CheckShardMcStateExtraProof(block, []*cell.Cell{stateProof, configProof})
 		if err != nil {
 			return nil, fmt.Errorf("incorrect proof: %w", err)
 		}
@@ -660,12 +675,16 @@ func (c *BlockCache) CacheBlockIfNeeded(ctx context.Context, id *ton.BlockIDExt)
 				}
 
 				var block tlb.Block
-				if err = tlb.LoadFromCell(&block, blk.BeginParse()); err != nil {
+				if err = tlb.Parse(&block, blk); err != nil {
 					return nil, false, fmt.Errorf("failed to parse block data: %w", err)
 				}
 
 				var shardAccounts tlb.ShardAccountBlocks
-				if err = tlb.LoadFromCellAsProof(&shardAccounts, block.Extra.ShardAccountBlocks.BeginParse()); err != nil {
+				shardAccountsSlice, err := block.Extra.ShardAccountBlocks.BeginParse()
+				if err != nil {
+					return nil, false, fmt.Errorf("failed to parse shard accounts from block: %w", err)
+				}
+				if err = tlb.LoadFromCellAsProof(&shardAccounts, shardAccountsSlice); err != nil {
 					return nil, false, fmt.Errorf("failed to load shard accounts from block: %w", err)
 				}
 
@@ -742,25 +761,30 @@ func (c *BlockCache) CacheBlockIfNeeded(ctx context.Context, id *ton.BlockIDExt)
 }
 
 func (c *BlockCache) GetTransaction(ctx context.Context, block *Block, account *ton.AccountID, lt int64) (*ton.TransactionInfo, error) {
-	sk := cell.CreateProofSkeleton()
-	pathToDict := sk.ProofRef(3).ProofRef(2).ProofRef(0)
+	proofBuilder := cell.NewMerkleProofBuilder(block.Data)
+
+	var parsedBlock tlb.Block
+	if err := tlb.Parse(&parsedBlock, proofBuilder.Root()); err != nil {
+		return nil, fmt.Errorf("failed to parse block data: %w", err)
+	}
+
+	var shardAccounts tlb.ShardAccountBlocks
+	shardAccountsSlice, err := parsedBlock.Extra.ShardAccountBlocks.BeginParse()
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse shard accounts from block: %w", err)
+	}
+	if err = tlb.LoadFromCellAsProof(&shardAccounts, shardAccountsSlice); err != nil {
+		return nil, fmt.Errorf("failed to load shard accounts from block: %w", err)
+	}
 
 	accKey := cell.BeginCell().MustStoreSlice(account.ID, 256).EndCell()
-	acc, accProofPath, err := block.ShardAccounts.Accounts.LoadValueWithProof(accKey, pathToDict)
+	acc, err := shardAccounts.Accounts.LoadValue(accKey)
 	if err != nil {
 		return &ton.TransactionInfo{
 			ID:          block.ID,
 			Proof:       nil,
 			Transaction: nil,
 		}, nil
-	}
-
-	if err = tlb.LoadFromCell(new(tlb.CurrencyCollection), acc); err != nil {
-		log.Warn().Err(err).Int64("lt", lt).Msg("failed to load currency collection from shard account")
-		return nil, ton.LSError{
-			Code: 500,
-			Text: "failed to load currency collection from shard account",
-		}
 	}
 
 	var accBlock tlb.AccountBlock
@@ -773,7 +797,7 @@ func (c *BlockCache) GetTransaction(ctx context.Context, block *Block, account *
 	}
 
 	key := cell.BeginCell().MustStoreInt(lt, 64).EndCell()
-	accTx, _, err := accBlock.Transactions.LoadValueWithProof(key, accProofPath)
+	accTx, err := accBlock.Transactions.LoadValue(key)
 	if err != nil {
 		return &ton.TransactionInfo{
 			ID:          block.ID,
@@ -782,7 +806,7 @@ func (c *BlockCache) GetTransaction(ctx context.Context, block *Block, account *
 		}, nil
 	}
 
-	proof, err := block.Data.CreateProof(sk)
+	proof, err := proofBuilder.CreateProof()
 	if err != nil {
 		log.Warn().Err(err).Int64("lt", lt).Msg("failed to create transaction proof")
 		return nil, ton.LSError{

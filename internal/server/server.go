@@ -126,14 +126,16 @@ func NewProxyBalancer(configs []config.ClientConfig, backendRouter *BackendRoute
 		inflightCache:       map[uint64]*CacheWaiter{},
 	}
 
-	s.gpCache = map[int]*lru.ARCCache{}
-	for k, v := range gpMap {
-		sz := gpCacheSizes[k]
-		if sz > 0 {
-			var err error
-			s.gpCache[v], err = lru.NewARC(sz)
-			if err != nil {
-				panic("failed to init general purpose cache: " + err.Error())
+	if !onlyProxy {
+		s.gpCache = map[int]*lru.ARCCache{}
+		for k, v := range gpMap {
+			sz := gpCacheSizes[k]
+			if sz > 0 {
+				var err error
+				s.gpCache[v], err = lru.NewARC(sz)
+				if err != nil {
+					panic("failed to init general purpose cache: " + err.Error())
+				}
 			}
 		}
 	}
@@ -360,7 +362,8 @@ func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.Server
 						resp, hitType = s.handleGetMasterchainInfo(ctx)
 					case ton.GetLibraries:
 						resp, hitType = s.handleGetLibraries(ctx, &v)
-					case GetLibrariesWithProof:
+					case ton.GetLibrariesWithProof:
+						gpType = GPTypeGetBlockProof
 					case ton.GetOneTransaction:
 						resp, hitType = s.handleGetTransaction(ctx, &v)
 						gpType = GPTypeGetTransaction
@@ -384,6 +387,8 @@ func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.Server
 					case ton.GetConfigParams:
 						gpType = GPTypeGetConfig
 					case ton.GetAllShardsInfo:
+					case ton.GetBlockOutMsgQueueSize, ton.GetDispatchQueueInfo, ton.GetDispatchQueueMessages:
+						gpType = GPTypeGetBlockProof
 					case ton.ListBlockTransactions, ton.ListBlockTransactionsExt:
 						gpType = GPTypeListTransactions
 					case ton.RunSmcMethod:
@@ -621,7 +626,7 @@ func (s *ProxyBalancer) handleRunSmcMethod(ctx context.Context, v *ton.RunSmcMet
 	}
 
 	var st tlb.AccountState
-	if err = st.LoadFromCell(state.State.BeginParse()); err != nil {
+	if err = tlb.Parse(&st, state.State); err != nil {
 		log.Warn().Err(err).Type("request", v).Msg("failed to parse account")
 		return ton.LSError{
 			Code: 500,
@@ -883,7 +888,7 @@ func (s *ProxyBalancer) handleGetLibraries(ctx context.Context, v *ton.GetLibrar
 
 		libsRes = append(libsRes, &ton.LibraryEntry{
 			Hash: kv.Key.MustLoadSlice(256),
-			Data: data,
+			Data: data.ToBOC(),
 		})
 	}
 
@@ -1044,7 +1049,10 @@ func (s *ProxyBalancer) handleLookupBlock(ctx context.Context, v *ton.LookupBloc
 
 func findLibs(code *cell.Cell) (res [][]byte) {
 	if code.RefsNum() == 0 && code.GetType() == cell.LibraryCellType {
-		slc := code.BeginParse()
+		slc, err := code.BeginParse()
+		if err != nil {
+			return nil
+		}
 		slc.MustLoadSlice(8)
 		return [][]byte{slc.MustLoadSlice(256)}
 	}

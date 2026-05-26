@@ -30,7 +30,12 @@ func normalizeLibraryListForLookup(hashes [][]byte) [][]byte {
 	return out
 }
 
-func unwrapLibraryResultCell(root *cell.Cell, hash []byte) *cell.Cell {
+func unwrapLibraryResultCell(data []byte, hash []byte) *cell.Cell {
+	root, err := cell.FromBOC(data)
+	if err != nil {
+		return nil
+	}
+
 	for root != nil {
 		if bytes.Equal(hash, root.Hash()) {
 			return root

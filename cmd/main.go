@@ -87,9 +87,9 @@ func main() {
 	}()
 
 	log.Info().Str("addr", cfg.ListenAddr).Msg("listening tcp")
-	proxy := server.NewProxyBalancer(cfg.Clients, router, cache,
-		cfg.DisableEmulationAndCache, int(cfg.MaxConnectionsPerIP), time.Duration(cfg.MaxKeepAliveSeconds)*time.Second,
-		map[string]int{
+	var gpCacheSizes map[string]int
+	if !cfg.DisableEmulationAndCache {
+		gpCacheSizes = map[string]int{
 			"general":           int(cfg.ResponseGeneralCacheSize) / 2,
 			"get_account":       int(cfg.ResponseGeneralCacheSize) / 2,
 			"run_method":        int(cfg.ResponseGeneralCacheSize) / 2,
@@ -97,7 +97,11 @@ func main() {
 			"get_proof":         300,
 			"lookup_block":      500,
 			"list_transactions": 1000,
-		})
+		}
+	}
+	proxy := server.NewProxyBalancer(cfg.Clients, router, cache,
+		cfg.DisableEmulationAndCache, int(cfg.MaxConnectionsPerIP), time.Duration(cfg.MaxKeepAliveSeconds)*time.Second,
+		gpCacheSizes)
 	if err = proxy.Listen(cfg.ListenAddr); err != nil {
 		log.Fatal().Err(err).Msg("listen failed")
 		return

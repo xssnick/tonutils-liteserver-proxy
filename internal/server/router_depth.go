@@ -167,7 +167,11 @@ func findStorageBoundary(current uint32, isAvailable func(seqno uint32) (bool, e
 		if candidate == 1 {
 			return 1, 0, nil
 		}
-		diff *= 2
+		if diff > (current-1)/2 {
+			diff = current - 1
+		} else {
+			diff *= 2
+		}
 	}
 
 	for oldestAvailable-firstUnavailable > 1 {
