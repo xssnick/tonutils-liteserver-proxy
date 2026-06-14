@@ -36,6 +36,11 @@ const HitTypeFailedValidate = "failed_validate"
 const HitTypeFailedInternal = "failed_internal"
 
 const (
+	backendQueryTimeout        = 7 * time.Second
+	archiveBackendQueryTimeout = 20 * time.Second
+)
+
+const (
 	GPTypeGeneral = iota
 	GPTypeGetAccount
 	GPTypeGetConfig
@@ -229,6 +234,15 @@ func NewProxyBalancer(configs []config.ClientConfig, backendRouter *BackendRoute
 
 func (s *ProxyBalancer) Listen(addr string) error {
 	return s.srv.Listen(addr)
+}
+
+func queryLiteserverWithTimeout(ctx context.Context, client ton.LiteClient, payload tl.Serializable, timeout time.Duration) (tl.Serializable, error) {
+	queryCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	var resp tl.Serializable
+	err := client.QueryLiteserver(queryCtx, payload, &resp)
+	return resp, err
 }
 
 var crcTable = crc64.MakeTable(crc64.ECMA)
@@ -508,15 +522,13 @@ func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.Server
 				if resp == nil {
 					log.Debug().Type("request", q.Data).Msg("direct proxy")
 					client, useArchive := s.backendRouter.SelectClientForPayload(q.Data)
-					timeout := 7 * time.Second
+					timeout := backendQueryTimeout
 					if useArchive {
-						timeout = 20 * time.Second
+						timeout = archiveBackendQueryTimeout
 					}
-					ctx, cancel := context.WithTimeout(ctx, timeout)
 
 					lsTm := time.Now()
-					err := client.QueryLiteserver(ctx, q.Data, &resp)
-					cancel()
+					backendResp, err := queryLiteserverWithTimeout(ctx, client, q.Data, timeout)
 					if err != nil {
 						if strings.HasSuffix(err.Error(), "context canceled") {
 							resp = ton.LSError{
@@ -531,10 +543,32 @@ func (s *ProxyBalancer) handleRequest(ctx context.Context, sc *liteclient.Server
 								Text: "backend node timeout",
 							}
 						}
-					} else if gp != nil {
-						if _, ok := resp.(ton.LSError); !ok {
-							// do not cache errors
-							gp.Add(gpKey, resp)
+					} else {
+						resp = backendResp
+						if retryClient, retryArchive := s.backendRouter.SelectArchiveRetryClient(q.Data, useArchive, resp); retryArchive {
+							retryTm := time.Now()
+							retryResp, retryErr := queryLiteserverWithTimeout(ctx, retryClient, q.Data, archiveBackendQueryTimeout)
+							if retryErr != nil {
+								if strings.HasSuffix(retryErr.Error(), "context canceled") {
+									log.Debug().Err(retryErr).Type("request", q.Data).Dur("took", time.Since(retryTm)).Msg("archive retry canceled")
+								} else {
+									log.Warn().Err(retryErr).Type("request", q.Data).Dur("took", time.Since(retryTm)).Msg("archive retry failed")
+								}
+							} else if retryResp != nil {
+								if ls, ok := unwrapLSError(retryResp); ok {
+									log.Debug().Int32("code", ls.Code).Str("reason", ls.Text).Type("request", q.Data).Dur("took", time.Since(retryTm)).Msg("archive retry returned ls error")
+								} else {
+									// Archive retry is best-effort: only data should replace the original fast -400.
+									resp = retryResp
+								}
+							}
+						}
+
+						if gp != nil {
+							if _, ok := unwrapLSError(resp); !ok {
+								// do not cache errors
+								gp.Add(gpKey, resp)
+							}
 						}
 					}
 				}

@@ -96,6 +96,75 @@ func TestBackendRouterKeepsFastWithoutSeqno(t *testing.T) {
 	}
 }
 
+func TestBackendRouterRetriesGetTransactionsNotFoundOnArchive(t *testing.T) {
+	router := testRouter(100, 250, true)
+
+	client, retryArchive := router.SelectArchiveRetryClient(ton.GetTransactions{}, false, ton.LSError{
+		Code: -400,
+		Text: "block is not in db",
+	})
+	if !retryArchive {
+		t.Fatalf("expected archive retry")
+	}
+	if name := selectedBackendName(t, client); name != "archive" {
+		t.Fatalf("expected archive backend, got %s", name)
+	}
+}
+
+func TestBackendRouterSkipsArchiveRetryForIneligibleResponses(t *testing.T) {
+	tests := []struct {
+		name           string
+		router         *BackendRouter
+		payload        any
+		alreadyArchive bool
+		resp           any
+	}{
+		{
+			name:    "no archive backend",
+			router:  testRouter(100, 250, false),
+			payload: ton.GetTransactions{},
+			resp:    ton.LSError{Code: -400},
+		},
+		{
+			name:           "already archive",
+			router:         testRouter(100, 250, true),
+			payload:        ton.GetTransactions{},
+			alreadyArchive: true,
+			resp:           ton.LSError{Code: -400},
+		},
+		{
+			name:    "different payload",
+			router:  testRouter(100, 250, true),
+			payload: ton.GetBlockData{},
+			resp:    ton.LSError{Code: -400},
+		},
+		{
+			name:    "different ls error",
+			router:  testRouter(100, 250, true),
+			payload: ton.GetTransactions{},
+			resp:    ton.LSError{Code: -401},
+		},
+		{
+			name:    "successful response",
+			router:  testRouter(100, 250, true),
+			payload: ton.GetTransactions{},
+			resp:    ton.TransactionList{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client, retryArchive := tt.router.SelectArchiveRetryClient(tt.payload, tt.alreadyArchive, tt.resp)
+			if retryArchive {
+				t.Fatalf("did not expect archive retry")
+			}
+			if client != nil {
+				t.Fatalf("expected nil retry client, got %T", client)
+			}
+		})
+	}
+}
+
 func TestBackendRouterUsesOldestProofSeqno(t *testing.T) {
 	router := testRouter(100, 250, true)
 

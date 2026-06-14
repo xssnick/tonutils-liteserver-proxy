@@ -94,6 +94,20 @@ func (r *BackendRouter) SelectClientForPayload(payload tl.Serializable) (ton.Lit
 	return r.fast.GetClient(), false
 }
 
+func (r *BackendRouter) SelectArchiveRetryClient(payload tl.Serializable, alreadyArchive bool, resp tl.Serializable) (ton.LiteClient, bool) {
+	if alreadyArchive || !r.hasArchiveRetryBackends() || !isGetTransactionsPayload(payload) {
+		return nil, false
+	}
+
+	ls, ok := unwrapLSError(resp)
+	if !ok || ls.Code != -400 {
+		return nil, false
+	}
+
+	log.Debug().Type("request", payload).Str("reason", ls.Text).Msg("retrying list transactions on archive backend")
+	return r.archive.GetClient(), true
+}
+
 func (r *BackendRouter) SelectClientByBlockID(id *ton.BlockIDExt) (ton.LiteClient, bool) {
 	if id == nil {
 		return r.fast.GetClient(), false
@@ -139,6 +153,23 @@ func (r *BackendRouter) currentMasterSeqno() (uint32, bool) {
 		return 0, false
 	}
 	return src.CurrentMasterSeqno()
+}
+
+func (r *BackendRouter) hasArchiveRetryBackends() bool {
+	return r != nil &&
+		r.fast != nil &&
+		len(r.fast.backends) > 0 &&
+		r.archive != nil &&
+		len(r.archive.backends) > 0
+}
+
+func isGetTransactionsPayload(payload tl.Serializable) bool {
+	switch payload.(type) {
+	case ton.GetTransactions, *ton.GetTransactions:
+		return true
+	default:
+		return false
+	}
 }
 
 func payloadMinSeqno(payload tl.Serializable) (uint32, bool) {
